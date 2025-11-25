@@ -275,11 +275,6 @@ ${schemaJsonString}`;
             options
         );
 
-        const retryOptions: LlmRetryOptions = {
-            ...options,
-            response_format,
-        };
-
         const processResponse = async (llmResponseString: string): Promise<z.infer<T>> => {
             let jsonData: any;
             try {
@@ -320,13 +315,20 @@ The response was valid JSON but did not conform to the required schema. Please r
             }
         };
 
+        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+            { role: "system", content: finalMainInstruction },
+            { role: "user", content: userMessagePayload }
+        ];
+
+        const retryOptions: LlmRetryOptions<z.infer<T>> = {
+            ...options,
+            messages,
+            response_format,
+            validate: processResponse
+        };
+
         // Use promptTextRetry because we expect a string response to parse as JSON
-        return llmRetryClient.promptTextRetry(
-            finalMainInstruction,
-            userMessagePayload,
-            processResponse,
-            retryOptions
-        );
+        return llmRetryClient.promptTextRetry(retryOptions);
     }
 
     async function isPromptZodCached<T extends ZodTypeAny>(

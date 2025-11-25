@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { PromptFunction, LlmPromptOptions } from "./createLlmClient.js";
+import { PromptFunction, LlmPromptOptions, normalizeOptions } from "./createLlmClient.js";
 
 // Custom error for the querier to handle, allowing retries with structured feedback.
 export class LlmRetryError extends Error {
@@ -39,15 +39,16 @@ export class LlmRetryAttemptError extends Error {
     }
 }
 
-export type LlmRetryOptions = Omit<LlmPromptOptions, 'messages'> & {
-    maxRetries?: number;
-};
-
 export interface LlmRetryResponseInfo {
     mode: 'main' | 'fallback';
     conversation: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
     attemptNumber: number;
 }
+
+export type LlmRetryOptions<T = any> = LlmPromptOptions & {
+    maxRetries?: number;
+    validate?: (response: any, info: LlmRetryResponseInfo) => Promise<T>;
+};
 
 export interface CreateLlmRetryClientParams {
     prompt: PromptFunction;
@@ -55,17 +56,13 @@ export interface CreateLlmRetryClientParams {
 }
 
 function constructLlmMessages(
-    mainInstruction: string,
-    userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
+    initialMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     attemptNumber: number,
     previousError?: LlmRetryAttemptError
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     if (attemptNumber === 0) {
         // First attempt
-        return [
-            { role: "system", content: mainInstruction },
-            { role: "user", content: userMessagePayload }
-        ];
+        return initialMessages;
     }
 
     if (!previousError) {
@@ -89,13 +86,14 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
     const { prompt, fallbackPrompt } = params;
 
     async function runPromptLoop<T>(
-        mainInstruction: string,
-        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        processResponse: (response: any, info: LlmRetryResponseInfo) => Promise<T>,
-        options: LlmRetryOptions | undefined,
+        options: LlmRetryOptions<T>,
         responseType: 'raw' | 'text' | 'image'
     ): Promise<T> {
-        const maxRetries = options?.maxRetries || 3;
+        const { maxRetries = 3, validate, messages, ...restOptions } = options;
+        
+        // Ensure messages is an array (normalizeOptions ensures this but types might be loose)
+        const initialMessages = messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+
         let lastError: LlmRetryAttemptError | undefined;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -103,18 +101,15 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
             const currentPrompt = useFallback ? fallbackPrompt! : prompt;
             const mode = useFallback ? 'fallback' : 'main';
 
-            const messages = constructLlmMessages(
-                mainInstruction,
-                userMessagePayload,
+            const currentMessages = constructLlmMessages(
+                initialMessages,
                 attempt,
                 lastError
             );
 
-            const { maxRetries: _maxRetries, ...restOptions } = options || {};
-
             try {
                 const completion = await currentPrompt({
-                    messages: messages,
+                    messages: currentMessages,
                     ...restOptions,
                 });
 
@@ -149,7 +144,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                 }
 
                 // Construct conversation history for success or potential error reporting
-                const finalConversation = [...messages];
+                const finalConversation = [...currentMessages];
                 if (assistantMessage) {
                     finalConversation.push(assistantMessage);
                 }
@@ -160,14 +155,17 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                     attemptNumber: attempt,
                 };
 
-                // processResponse is expected to throw LlmRetryError for validation failures.
-                const result = await processResponse(dataToProcess, info);
-                return result; // Success
+                if (validate) {
+                    const result = await validate(dataToProcess, info);
+                    return result;
+                }
+
+                return dataToProcess as T;
 
             } catch (error: any) {
                 if (error instanceof LlmRetryError) {
                     // This is a recoverable error, so we'll create a detailed attempt error and continue the loop.
-                    const conversationForError = [...messages];
+                    const conversationForError = [...currentMessages];
                     
                     // If the error contains the raw response (e.g. the invalid text), add it to history
                     // so the LLM knows what it generated previously.
@@ -197,31 +195,49 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
         );
     }
 
-    async function promptRetry<T>(
-        mainInstruction: string,
-        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        processResponse: (response: OpenAI.Chat.Completions.ChatCompletion, info: LlmRetryResponseInfo) => Promise<T>,
-        options?: LlmRetryOptions
+    async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
+        content: string,
+        options?: Omit<LlmRetryOptions<T>, 'messages'>
+    ): Promise<T>;
+    async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
+        options: LlmRetryOptions<T>
+    ): Promise<T>;
+    async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
+        arg1: string | LlmRetryOptions<T>,
+        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T> {
-        return runPromptLoop(mainInstruction, userMessagePayload, processResponse, options, 'raw');
+        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
+        return runPromptLoop(options, 'raw');
     }
 
-    async function promptTextRetry<T>(
-        mainInstruction: string,
-        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        processResponse: (response: string, info: LlmRetryResponseInfo) => Promise<T>,
-        options?: LlmRetryOptions
+    async function promptTextRetry<T = string | null>(
+        content: string,
+        options?: Omit<LlmRetryOptions<T>, 'messages'>
+    ): Promise<T>;
+    async function promptTextRetry<T = string | null>(
+        options: LlmRetryOptions<T>
+    ): Promise<T>;
+    async function promptTextRetry<T = string | null>(
+        arg1: string | LlmRetryOptions<T>,
+        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T> {
-        return runPromptLoop(mainInstruction, userMessagePayload, processResponse, options, 'text');
+        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
+        return runPromptLoop(options, 'text');
     }
 
-    async function promptImageRetry<T>(
-        mainInstruction: string,
-        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        processResponse: (response: Buffer, info: LlmRetryResponseInfo) => Promise<T>,
-        options?: LlmRetryOptions
+    async function promptImageRetry<T = Buffer | null>(
+        content: string,
+        options?: Omit<LlmRetryOptions<T>, 'messages'>
+    ): Promise<T>;
+    async function promptImageRetry<T = Buffer | null>(
+        options: LlmRetryOptions<T>
+    ): Promise<T>;
+    async function promptImageRetry<T = Buffer | null>(
+        arg1: string | LlmRetryOptions<T>,
+        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T> {
-        return runPromptLoop(mainInstruction, userMessagePayload, processResponse, options, 'image');
+        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
+        return runPromptLoop(options, 'image');
     }
 
     return { promptRetry, promptTextRetry, promptImageRetry };
