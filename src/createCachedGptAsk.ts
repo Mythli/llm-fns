@@ -128,6 +128,38 @@ export function truncateMessages(messages: OpenAI.Chat.Completions.ChatCompletio
     return systemMessage ? [systemMessage, ...finalMessages] : finalMessages;
 }
 
+function concatMessageText(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): string {
+    const textParts: string[] = [];
+    for (const message of messages) {
+        if (message.content) {
+            if (typeof message.content === 'string') {
+                textParts.push(message.content);
+            } else if (Array.isArray(message.content)) {
+                for (const part of message.content) {
+                    if (part.type === 'text') {
+                        textParts.push(part.text);
+                    } else if (part.type === 'image_url') {
+                        textParts.push('[IMAGE]');
+                    }
+                }
+            }
+        }
+    }
+    return textParts.join(' ');
+}
+
+function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): string {
+    const fullText = concatMessageText(messages);
+    // Replace multiple whitespace chars with a single space and trim.
+    const cleanedText = fullText.replace(/\s+/g, ' ').trim();
+    // Truncate to a reasonable length.
+    const maxLength = 150;
+    if (cleanedText.length > maxLength) {
+        return cleanedText.substring(0, maxLength) + '...';
+    }
+    return cleanedText;
+}
+
 /**
  * The response format for OpenAI and OpenRouter.
  * OpenRouter extends this with 'json_schema'.
@@ -234,6 +266,8 @@ export function createCachedGptAsk(params: CreateCachedGptAskParams) {
             }
         }
 
+        const promptSummary = getPromptSummary(finalMessages);
+
         const apiCallAndCache = async (): Promise<OpenAI.Chat.Completions.ChatCompletion> => {
             const task = () => executeWithRetry<OpenAI.Chat.Completions.ChatCompletion, OpenAI.Chat.Completions.ChatCompletion>(
                 async () => {
@@ -245,7 +279,7 @@ export function createCachedGptAsk(params: CreateCachedGptAskParams) {
                 retries ?? 3
             );
 
-            const response = (await (queue ? queue.add(task) : task())) as OpenAI.Chat.Completions.ChatCompletion;
+            const response = (await (queue ? queue.add(task, { id: promptSummary } as any) : task())) as OpenAI.Chat.Completions.ChatCompletion;
 
             if (cacheInstance && response && cacheKey) {
                 try {
