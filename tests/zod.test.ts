@@ -1,6 +1,30 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { createTestLlm } from './setup.js';
+import { createZodLlmClient } from '../src/createZodLlmClient.js';
+import { LlmRetryExhaustedError } from '../src/createLlmRetryClient.js';
+
+// Helper to create a mock prompt function
+function createMockPrompt(responses: string[]) {
+    let callCount = 0;
+    return vi.fn(async (...args: any[]) => {
+        const content = responses[callCount] || responses[responses.length - 1];
+        callCount++;
+        
+        return {
+            id: 'mock-id',
+            object: 'chat.completion',
+            created: Date.now(),
+            model: 'mock-model',
+            choices: [{
+                message: { role: 'assistant', content },
+                finish_reason: 'stop',
+                index: 0
+            }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+        } as any;
+    });
+}
 
 describe('Zod Structured Output Integration', () => {
     it('should extract structured data matching a schema', async () => {
@@ -36,23 +60,96 @@ describe('Zod Structured Output Integration', () => {
         expect(banana?.color).toBe('yellow');
     });
 
-    it('should handle validation retries (simulated by strict schema)', async () => {
-        const { llm } = await createTestLlm();
-
-        // A schema that requires specific formatting that might be missed initially
-        // forcing the retry/fixer logic to kick in if the model is lazy.
-        const MathSchema = z.object({
-            result: z.number(),
-            explanation: z.string().max(50), // Short constraint
+    describe('Retry Mechanisms (Mocked)', () => {
+        const Schema = z.object({
+            age: z.number()
         });
 
-        const result = await llm.promptZod(
-            "Calculate 25 * 4 and explain briefly.",
-            [{ type: 'text', text: "Do the math." }],
-            MathSchema
-        );
+        it('should fix invalid JSON syntax using the internal fixer', async () => {
+            const mockPrompt = createMockPrompt([
+                '{"age": 20', // Missing closing brace
+                '{"age": 20}' // Fixed
+            ]);
 
-        expect(result.result).toBe(100);
-        expect(result.explanation.length).toBeLessThanOrEqual(50);
+            const client = createZodLlmClient({
+                prompt: mockPrompt,
+                isPromptCached: async () => false,
+            });
+
+            const result = await client.promptZod("test", "test", Schema);
+            
+            expect(result.age).toBe(20);
+            expect(mockPrompt).toHaveBeenCalledTimes(2);
+            
+            // The second call should be the fixer prompt
+            // args[0] is options object
+            const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
+            expect(secondCallArgs.messages[1].content).toContain('BROKEN RESPONSE');
+        });
+
+        it('should fix schema validation errors using the internal fixer', async () => {
+            const mockPrompt = createMockPrompt([
+                '{"age": "twenty"}', // String instead of number
+                '{"age": 20}'        // Fixed
+            ]);
+
+            const client = createZodLlmClient({
+                prompt: mockPrompt,
+                isPromptCached: async () => false,
+            });
+
+            const result = await client.promptZod("test", "test", Schema);
+            
+            expect(result.age).toBe(20);
+            expect(mockPrompt).toHaveBeenCalledTimes(2);
+            
+            const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
+            expect(secondCallArgs.messages[1].content).toContain('SCHEMA_VALIDATION_ERROR');
+        });
+
+        it('should use the main retry loop when internal fixer is disabled', async () => {
+            const mockPrompt = createMockPrompt([
+                '{"age": "wrong"}', // Initial wrong response
+                '{"age": 20}'       // Corrected in next turn
+            ]);
+
+            const client = createZodLlmClient({
+                prompt: mockPrompt,
+                isPromptCached: async () => false,
+                disableJsonFixer: true // Force main loop
+            });
+
+            const result = await client.promptZod("test", "test", Schema);
+            
+            expect(result.age).toBe(20);
+            expect(mockPrompt).toHaveBeenCalledTimes(2);
+            
+            // In the main loop, the history is preserved and error is added as user message
+            const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
+            const messages = secondCallArgs.messages;
+            // 0: System, 1: User, 2: Assistant (wrong), 3: User (Error feedback)
+            expect(messages.length).toBe(4);
+            expect(messages[3].role).toBe('user');
+            expect(messages[3].content).toContain('SCHEMA_VALIDATION_ERROR');
+        });
+
+        it('should throw LlmRetryExhaustedError when retries are exhausted', async () => {
+            const mockPrompt = createMockPrompt([
+                '{"age": "wrong"}',
+                '{"age": "still wrong"}',
+                '{"age": "forever wrong"}'
+            ]);
+
+            const client = createZodLlmClient({
+                prompt: mockPrompt,
+                isPromptCached: async () => false,
+                disableJsonFixer: true
+            });
+
+            await expect(client.promptZod("test", "test", Schema, { maxRetries: 1 }))
+                .rejects.toThrow(LlmRetryExhaustedError);
+            
+            expect(mockPrompt).toHaveBeenCalledTimes(2); // Initial + 1 retry
+        });
     });
 });
