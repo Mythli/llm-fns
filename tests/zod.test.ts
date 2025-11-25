@@ -133,6 +133,29 @@ describe('Zod Structured Output Integration', () => {
             expect(messages[3].content).toContain('SCHEMA_VALIDATION_ERROR');
         });
 
+        it('should switch to fallback prompt on retry if provided', async () => {
+            const mockMainPrompt = createMockPrompt([
+                '{"age": "wrong"}' // Fails schema
+            ]);
+            
+            const mockFallbackPrompt = createMockPrompt([
+                '{"age": 20}' // Succeeds
+            ]);
+
+            const client = createZodLlmClient({
+                prompt: mockMainPrompt,
+                fallbackPrompt: mockFallbackPrompt,
+                isPromptCached: async () => false,
+                disableJsonFixer: true // Force error to retry loop immediately
+            });
+
+            const result = await client.promptZod("test", "test", Schema);
+            
+            expect(result.age).toBe(20);
+            expect(mockMainPrompt).toHaveBeenCalledTimes(1);
+            expect(mockFallbackPrompt).toHaveBeenCalledTimes(1);
+        });
+
         it('should throw LlmRetryExhaustedError when retries are exhausted', async () => {
             const mockPrompt = createMockPrompt([
                 '{"age": "wrong"}',
