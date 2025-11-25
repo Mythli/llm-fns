@@ -10,6 +10,19 @@ const PersonSchema = z.object({
     lastName: z.string().describe("The person's last name"),
 });
 
+function createMockCompletion(content: string): any {
+    return {
+        choices: [
+            {
+                message: {
+                    role: 'assistant',
+                    content: content
+                }
+            }
+        ]
+    };
+}
+
 describe('ZodLlmQuerier', () => {
     let querier: ReturnType<typeof createZodLlmQuerier>;
     let mockAsk: MockedFunction<AskGptFunction>;
@@ -25,8 +38,8 @@ describe('ZodLlmQuerier', () => {
     it('should return valid data on the first attempt (happy path)', async () => {
         // Arrange
         const validResponse = { firstName: 'John', lastName: 'Doe' };
-        // The mock needs to return a promise that resolves to the response string
-        mockAsk.mockResolvedValue(JSON.stringify(validResponse));
+        // The mock needs to return a promise that resolves to the response object
+        mockAsk.mockResolvedValue(createMockCompletion(JSON.stringify(validResponse)));
         querier = createZodLlmQuerier({ ask: mockAsk });
 
         // Act
@@ -43,9 +56,9 @@ describe('ZodLlmQuerier', () => {
         const validResponse = { firstName: 'John', lastName: 'Doe' };
 
         mockAsk
-            .mockResolvedValueOnce(invalidResponse) // 1. Initial call, schema error
-            .mockResolvedValueOnce("CANNOT_FIX")    // 2. Fixer call, fails
-            .mockResolvedValueOnce(JSON.stringify(validResponse));  // 3. Retry call, succeeds
+            .mockResolvedValueOnce(createMockCompletion(invalidResponse)) // 1. Initial call, schema error
+            .mockResolvedValueOnce(createMockCompletion("CANNOT_FIX"))    // 2. Fixer call, fails
+            .mockResolvedValueOnce(createMockCompletion(JSON.stringify(validResponse)));  // 3. Retry call, succeeds
 
         querier = createZodLlmQuerier({ ask: mockAsk });
 
@@ -72,8 +85,8 @@ describe('ZodLlmQuerier', () => {
         const fixedResponseString = JSON.stringify(fixedResponse);
 
         mockAsk
-            .mockResolvedValueOnce(invalidJsonResponse) // Initial call returns broken JSON
-            .mockResolvedValueOnce(fixedResponseString); // Fixer call returns valid JSON
+            .mockResolvedValueOnce(createMockCompletion(invalidJsonResponse)) // Initial call returns broken JSON
+            .mockResolvedValueOnce(createMockCompletion(fixedResponseString)); // Fixer call returns valid JSON
 
         querier = createZodLlmQuerier({ ask: mockAsk });
 
@@ -100,9 +113,9 @@ describe('ZodLlmQuerier', () => {
         const validResponse = { firstName: 'John', lastName: 'Doe' };
 
         mockAsk
-            .mockResolvedValueOnce(invalidJsonResponse) // 1. Initial call, broken JSON
-            .mockResolvedValueOnce("CANNOT_FIX")       // 2. Fixer call, fails to fix
-            .mockResolvedValueOnce(JSON.stringify(validResponse)); // 3. Regular retry call, succeeds
+            .mockResolvedValueOnce(createMockCompletion(invalidJsonResponse)) // 1. Initial call, broken JSON
+            .mockResolvedValueOnce(createMockCompletion("CANNOT_FIX"))       // 2. Fixer call, fails to fix
+            .mockResolvedValueOnce(createMockCompletion(JSON.stringify(validResponse))); // 3. Regular retry call, succeeds
 
         querier = createZodLlmQuerier({ ask: mockAsk });
 

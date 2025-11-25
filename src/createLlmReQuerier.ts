@@ -88,11 +88,12 @@ function constructLlmMessages(
 export function createLlmReQuerier(params: CreateLlmReQuerierParams) {
     const { ask, fallbackAsk } = params;
 
-    async function query<T>(
+    async function runQueryLoop<T>(
         mainInstruction: string,
         userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        processResponse: (response: string, info: LlmResponseInfo) => Promise<T>,
-        options?: LlmReQuerierOptions
+        processResponse: (response: any, info: LlmResponseInfo) => Promise<T>,
+        options: LlmReQuerierOptions | undefined,
+        responseType: 'raw' | 'text' | 'image'
     ): Promise<T> {
         const maxRetries = options?.maxRetries || 3;
         let lastError: LlmAttemptError | undefined;
@@ -112,17 +113,46 @@ export function createLlmReQuerier(params: CreateLlmReQuerierParams) {
             const { maxRetries: _maxRetries, ...restOptions } = options || {};
 
             try {
-                const llmResponseString = await currentAsk({
+                const completion = await currentAsk({
                     messages: messages,
                     ...restOptions,
                 });
 
-                if (!llmResponseString) {
-                    // This is a validation error, so we throw a custom error to be caught for a retry.
-                    throw new LlmQuerierError("LLM returned no response.", 'CUSTOM_ERROR');
+                const assistantMessage = completion.choices[0]?.message;
+                let dataToProcess: any = completion;
+                
+                if (responseType === 'text') {
+                    const content = assistantMessage?.content;
+                    if (content === null || content === undefined) {
+                        throw new LlmQuerierError("LLM returned no text content.", 'CUSTOM_ERROR', undefined, JSON.stringify(completion));
+                    }
+                    dataToProcess = content;
+                } else if (responseType === 'image') {
+                    const messageAny = assistantMessage as any;
+                    if (messageAny.images && Array.isArray(messageAny.images) && messageAny.images.length > 0) {
+                        const imageUrl = messageAny.images[0].image_url.url;
+                        if (typeof imageUrl === 'string') {
+                            if (imageUrl.startsWith('http')) {
+                                const imgRes = await fetch(imageUrl);
+                                const arrayBuffer = await imgRes.arrayBuffer();
+                                dataToProcess = Buffer.from(arrayBuffer);
+                            } else {
+                                const base64Data = imageUrl.replace(/^data:image\/\w+;base64,/, "");
+                                dataToProcess = Buffer.from(base64Data, 'base64');
+                            }
+                        } else {
+                            throw new LlmQuerierError("LLM returned invalid image URL.", 'CUSTOM_ERROR', undefined, JSON.stringify(completion));
+                        }
+                    } else {
+                        throw new LlmQuerierError("LLM returned no image.", 'CUSTOM_ERROR', undefined, JSON.stringify(completion));
+                    }
                 }
 
-                const finalConversation = [...messages, { role: 'assistant', content: llmResponseString }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+                // Construct conversation history for success or potential error reporting
+                const finalConversation = [...messages];
+                if (assistantMessage) {
+                    finalConversation.push(assistantMessage);
+                }
 
                 const info: LlmResponseInfo = {
                     mode,
@@ -131,20 +161,26 @@ export function createLlmReQuerier(params: CreateLlmReQuerierParams) {
                 };
 
                 // processResponse is expected to throw LlmQuerierError for validation failures.
-                const result = await processResponse(llmResponseString, info);
+                const result = await processResponse(dataToProcess, info);
                 return result; // Success
 
             } catch (error: any) {
                 if (error instanceof LlmQuerierError) {
                     // This is a recoverable error, so we'll create a detailed attempt error and continue the loop.
                     const conversationForError = [...messages];
+                    
+                    // If the error contains the raw response (e.g. the invalid text), add it to history
+                    // so the LLM knows what it generated previously.
                     if (error.rawResponse) {
                         conversationForError.push({ role: 'assistant', content: error.rawResponse });
+                    } else if (responseType === 'raw' && error.details) {
+                        // For raw mode, if we have details, maybe we can infer something, but usually rawResponse is key.
                     }
+
                     lastError = new LlmAttemptError(
                         `Attempt ${attempt + 1} failed.`,
                         mode,
-                        conversationForError, // The conversation including the assistant's (failed) reply
+                        conversationForError, 
                         attempt,
                         { cause: error }
                     );
@@ -161,5 +197,32 @@ export function createLlmReQuerier(params: CreateLlmReQuerierParams) {
         );
     }
 
-    return { query };
+    async function query<T>(
+        mainInstruction: string,
+        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        processResponse: (response: OpenAI.Chat.Completions.ChatCompletion, info: LlmResponseInfo) => Promise<T>,
+        options?: LlmReQuerierOptions
+    ): Promise<T> {
+        return runQueryLoop(mainInstruction, userMessagePayload, processResponse, options, 'raw');
+    }
+
+    async function queryText<T>(
+        mainInstruction: string,
+        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        processResponse: (response: string, info: LlmResponseInfo) => Promise<T>,
+        options?: LlmReQuerierOptions
+    ): Promise<T> {
+        return runQueryLoop(mainInstruction, userMessagePayload, processResponse, options, 'text');
+    }
+
+    async function queryImage<T>(
+        mainInstruction: string,
+        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        processResponse: (response: Buffer, info: LlmResponseInfo) => Promise<T>,
+        options?: LlmReQuerierOptions
+    ): Promise<T> {
+        return runQueryLoop(mainInstruction, userMessagePayload, processResponse, options, 'image');
+    }
+
+    return { query, queryText, queryImage };
 }

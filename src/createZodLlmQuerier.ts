@@ -68,17 +68,19 @@ ${brokenResponse}
 
         const { maxRetries, useResponseFormat: _useResponseFormat, ...restOptions } = options || {};
 
-        const fixedResponse = await ask({
+        const completion = await ask({
             messages,
             response_format,
             ...restOptions
         });
+        
+        const fixedResponse = completion.choices[0]?.message?.content;
 
         if (fixedResponse && fixedResponse.trim() === 'CANNOT_FIX') {
             return null;
         }
 
-        return fixedResponse;
+        return fixedResponse || null;
     }
 
 
@@ -231,7 +233,8 @@ The response was valid JSON but did not conform to the required schema. Please r
             }
         };
 
-        return llmReQuerier.query(
+        // Use queryText because we expect a string response to parse as JSON
+        return llmReQuerier.queryText(
             finalMainInstruction,
             userMessagePayload,
             processResponse,
