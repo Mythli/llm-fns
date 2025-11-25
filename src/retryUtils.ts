@@ -19,6 +19,7 @@ export interface RetryValidationResult<ValidatedDataType, FeedbackType = any> {
  *                             and validates it. It returns a RetryValidationResult.
  * @param maxRetries - The maximum number of retries after the initial attempt (e.g., 2 means 3 total attempts).
  * @param initialFeedbackForOperation - Optional initial feedback to pass to the very first call of the operation.
+ * @param shouldRetryError - Optional function to determine if a specific error should trigger a retry. Returns true to retry, false to throw immediately.
  * @returns A Promise that resolves with the validated data if successful.
  * @throws An error if all attempts fail or a critical failure occurs.
  */
@@ -29,7 +30,8 @@ export async function executeWithRetry<OperationReturnType, ValidatedDataType, F
         attemptNumber: number
     ) => Promise<RetryValidationResult<ValidatedDataType, FeedbackType>>,
     maxRetries: number,
-    initialFeedbackForOperation?: FeedbackType
+    initialFeedbackForOperation?: FeedbackType,
+    shouldRetryError?: (error: any) => boolean
 ): Promise<ValidatedDataType> {
     let currentFeedbackForOperation: FeedbackType | undefined = initialFeedbackForOperation;
 
@@ -47,6 +49,11 @@ export async function executeWithRetry<OperationReturnType, ValidatedDataType, F
         try {
             rawResult = await operation(attemptNumber, currentFeedbackForOperation);
         } catch (opError: any) {
+            // Check if we should stop retrying based on the error type
+            if (shouldRetryError && !shouldRetryError(opError)) {
+                throw opError;
+            }
+
             // Error directly from the operation (e.g., network failure, `this.ask` throws)
             if (attemptNumber >= maxRetries) {
                 // On the final attempt, throw an error that preserves the entire causal chain.

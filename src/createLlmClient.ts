@@ -276,7 +276,15 @@ export function createLlmClient(params: CreateLlmClientParams) {
                 async (completion) => {
                     return { isValid: true, data: completion };
                 },
-                retries ?? 3
+                retries ?? 3,
+                undefined,
+                (error: any) => {
+                    // Do not retry if the API key is invalid (401) or if the error code explicitly states it.
+                    if (error?.status === 401 || error?.code === 'invalid_api_key') {
+                        return false;
+                    }
+                    return true;
+                }
             );
 
             const response = (await (queue ? queue.add(task, { id: promptSummary } as any) : task())) as OpenAI.Chat.Completions.ChatCompletion;
