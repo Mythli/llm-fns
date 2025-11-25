@@ -49,48 +49,46 @@ export interface LlmResponseInfo {
     attemptNumber: number;
 }
 
-export class LlmReQuerier {
-    protected fallbackAsk?: AskGptFunction;
+export interface CreateLlmReQuerierParams {
+    ask: AskGptFunction;
+    fallbackAsk?: AskGptFunction;
+}
 
-    constructor(
-        protected ask: AskGptFunction,
-        options: { fallbackAsk?: AskGptFunction } = {}
-    ) {
-        this.fallbackAsk = options.fallbackAsk;
+function constructLlmMessages(
+    mainInstruction: string,
+    userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+    attemptNumber: number,
+    previousError?: LlmAttemptError
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+    if (attemptNumber === 0) {
+        // First attempt
+        return [
+            { role: "system", content: mainInstruction },
+            { role: "user", content: userMessagePayload }
+        ];
     }
 
-    private _constructLlmMessages(
-        mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        attemptNumber: number,
-        previousError?: LlmAttemptError
-    ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-        if (attemptNumber === 0) {
-            // First attempt
-            return [
-                { role: "system", content: mainInstruction },
-                { role: "user", content: userMessagePayload }
-            ];
-        }
+    if (!previousError) {
+        // Should not happen for attempt > 0, but as a safeguard...
+        throw new Error("Invariant violation: previousError is missing for a retry attempt.");
+    }
+    const cause = previousError.cause;
 
-        if (!previousError) {
-            // Should not happen for attempt > 0, but as a safeguard...
-            throw new Error("Invariant violation: previousError is missing for a retry attempt.");
-        }
-        const cause = previousError.cause;
-
-        if (!(cause instanceof LlmQuerierError)) {
-            throw Error('cause must be an instanceof LlmQuerierError')
-        }
-
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [...previousError.conversation];
-
-        messages.push({ role: "user", content: cause.message });
-
-        return messages;
+    if (!(cause instanceof LlmQuerierError)) {
+        throw Error('cause must be an instanceof LlmQuerierError')
     }
 
-    public async query<T>(
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [...previousError.conversation];
+
+    messages.push({ role: "user", content: cause.message });
+
+    return messages;
+}
+
+export function createLlmReQuerier(params: CreateLlmReQuerierParams) {
+    const { ask, fallbackAsk } = params;
+
+    async function query<T>(
         mainInstruction: string,
         userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
         processResponse: (response: string, info: LlmResponseInfo) => Promise<T>,
@@ -100,11 +98,11 @@ export class LlmReQuerier {
         let lastError: LlmAttemptError | undefined;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            const useFallback = !!this.fallbackAsk && attempt > 0;
-            const currentAsk = useFallback ? this.fallbackAsk! : this.ask;
+            const useFallback = !!fallbackAsk && attempt > 0;
+            const currentAsk = useFallback ? fallbackAsk! : ask;
             const mode = useFallback ? 'fallback' : 'main';
 
-            const messages = this._constructLlmMessages(
+            const messages = constructLlmMessages(
                 mainInstruction,
                 userMessagePayload,
                 attempt,
@@ -162,4 +160,6 @@ export class LlmReQuerier {
             { cause: lastError }
         );
     }
+
+    return { query };
 }

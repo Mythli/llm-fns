@@ -1,14 +1,8 @@
 import OpenAI from 'openai'; // Import the OpenAI library
 import * as z from "zod";
-import {AskGptFunction, GptAskOptions, OpenRouterResponseFormat} from "./createCachedGptAsk.js";
-import { LlmReQuerier, LlmQuerierError, LlmReQuerierOptions } from "./llmReQuerier.js";
-import {ZodError, ZodTypeAny} from "zod";
-
-// LlmContentPart will now directly use OpenAI's type
-// export interface LlmContentPart { ... } // This is no longer needed
-
-// Define the structure of feedback passed between retry attempts
-// This is now handled by LlmReQuerier
+import { AskGptFunction, GptAskOptions, OpenRouterResponseFormat } from "./createCachedGptAsk.js";
+import { createLlmReQuerier, LlmQuerierError, LlmReQuerierOptions } from "./llmReQuerier.js";
+import { ZodError, ZodTypeAny } from "zod";
 
 export type ZodLlmQuerierOptions = Omit<GptAskOptions, 'messages' | 'response_format'> & {
     maxRetries?: number;
@@ -27,19 +21,17 @@ export type ZodLlmQuerierOptions = Omit<GptAskOptions, 'messages' | 'response_fo
     beforeValidation?: (data: any) => any;
 }
 
-export class ZodLlmQuerier {
-    protected llmReQuerier: LlmReQuerier;
-    protected disableJsonFixer: boolean;
+export interface CreateZodLlmQuerierParams {
+    ask: AskGptFunction;
+    fallbackAsk?: AskGptFunction;
+    disableJsonFixer?: boolean;
+}
 
-    constructor(
-        protected ask: AskGptFunction,
-        options: { fallbackAsk?: AskGptFunction, disableJsonFixer?: boolean } = {}
-    ) {
-        this.llmReQuerier = new LlmReQuerier(ask, { fallbackAsk: options.fallbackAsk });
-        this.disableJsonFixer = options.disableJsonFixer ?? false;
-    }
+export function createZodLlmQuerier(params: CreateZodLlmQuerierParams) {
+    const { ask, fallbackAsk, disableJsonFixer = false } = params;
+    const llmReQuerier = createLlmReQuerier({ ask, fallbackAsk });
 
-    private async _tryToFixJson(
+    async function _tryToFixJson(
         brokenResponse: string,
         schemaJsonString: string,
         errorDetails: string,
@@ -76,7 +68,7 @@ ${brokenResponse}
 
         const { maxRetries, useResponseFormat: _useResponseFormat, ...restOptions } = options || {};
 
-        const fixedResponse = await this.ask({
+        const fixedResponse = await ask({
             messages,
             response_format,
             ...restOptions
@@ -90,7 +82,7 @@ ${brokenResponse}
     }
 
 
-    private async _parseOrFixJson(
+    async function _parseOrFixJson(
         llmResponseString: string,
         schemaJsonString: string,
         options: ZodLlmQuerierOptions | undefined
@@ -111,13 +103,13 @@ ${brokenResponse}
         try {
             return JSON.parse(jsonDataToParse);
         } catch (parseError: any) {
-            if (this.disableJsonFixer) {
+            if (disableJsonFixer) {
                 throw parseError; // re-throw original error
             }
 
             // Attempt a one-time fix before failing.
             const errorDetails = `JSON Parse Error: ${parseError.message}`;
-            const fixedResponse = await this._tryToFixJson(jsonDataToParse, schemaJsonString, errorDetails, options);
+            const fixedResponse = await _tryToFixJson(jsonDataToParse, schemaJsonString, errorDetails, options);
 
             if (fixedResponse) {
                 try {
@@ -132,7 +124,7 @@ ${brokenResponse}
         }
     }
 
-    private async _validateOrFixSchema<SchemaType extends ZodTypeAny>(
+    async function _validateOrFixSchema<SchemaType extends ZodTypeAny>(
         jsonData: any,
         dataExtractionSchema: SchemaType,
         schemaJsonString: string,
@@ -144,13 +136,13 @@ ${brokenResponse}
             }
             return dataExtractionSchema.parse(jsonData);
         } catch (validationError: any) {
-            if (!(validationError instanceof ZodError) || this.disableJsonFixer) {
+            if (!(validationError instanceof ZodError) || disableJsonFixer) {
                 throw validationError;
             }
 
             // Attempt a one-time fix for schema validation errors.
             const errorDetails = `Schema Validation Error: ${JSON.stringify(validationError.format(), null, 2)}`;
-            const fixedResponse = await this._tryToFixJson(JSON.stringify(jsonData, null, 2), schemaJsonString, errorDetails, options);
+            const fixedResponse = await _tryToFixJson(JSON.stringify(jsonData, null, 2), schemaJsonString, errorDetails, options);
 
             if (fixedResponse) {
                 try {
@@ -169,7 +161,7 @@ ${brokenResponse}
         }
     }
 
-    public async query<T extends ZodTypeAny>(
+    async function query<T extends ZodTypeAny>(
         mainInstruction: string,
         userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[], // Use OpenAI's type
         dataExtractionSchema: T,
@@ -202,7 +194,7 @@ ${schemaJsonString}`;
         const processResponse = async (llmResponseString: string): Promise<z.infer<T>> => {
             let jsonData: any;
             try {
-                jsonData = await this._parseOrFixJson(llmResponseString, schemaJsonString, options);
+                jsonData = await _parseOrFixJson(llmResponseString, schemaJsonString, options);
             } catch (parseError: any) {
                 const errorMessage = `Your previous response resulted in an error.
 Error Type: JSON_PARSE_ERROR
@@ -217,7 +209,7 @@ The response provided was not valid JSON. Please correct it.`;
             }
 
             try {
-                const validatedData = await this._validateOrFixSchema(jsonData, dataExtractionSchema, schemaJsonString, options);
+                const validatedData = await _validateOrFixSchema(jsonData, dataExtractionSchema, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
                 if (validationError instanceof ZodError) {
@@ -239,11 +231,13 @@ The response was valid JSON but did not conform to the required schema. Please r
             }
         };
 
-        return this.llmReQuerier.query(
+        return llmReQuerier.query(
             finalMainInstruction,
             userMessagePayload,
             processResponse,
             querierOptions
         );
     }
+
+    return { query };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { MockedFunction } from 'vitest';
-import { ZodLlmQuerier } from './zodLlmQuerier.js';
+import { createZodLlmQuerier } from './zodLlmQuerier.js';
 import { z } from 'zod';
 import { AskGptFunction } from './createCachedGptAsk.js';
 
@@ -11,7 +11,7 @@ const PersonSchema = z.object({
 });
 
 describe('ZodLlmQuerier', () => {
-    let querier: ZodLlmQuerier;
+    let querier: ReturnType<typeof createZodLlmQuerier>;
     let mockAsk: MockedFunction<AskGptFunction>;
 
     const mainInstruction = 'Extract person details.';
@@ -27,7 +27,7 @@ describe('ZodLlmQuerier', () => {
         const validResponse = { firstName: 'John', lastName: 'Doe' };
         // The mock needs to return a promise that resolves to the response string
         mockAsk.mockResolvedValue(JSON.stringify(validResponse));
-        querier = new ZodLlmQuerier(mockAsk);
+        querier = createZodLlmQuerier({ ask: mockAsk });
 
         // Act
         const result = await querier.query(mainInstruction, userMessagePayload, PersonSchema);
@@ -47,7 +47,7 @@ describe('ZodLlmQuerier', () => {
             .mockResolvedValueOnce("CANNOT_FIX")    // 2. Fixer call, fails
             .mockResolvedValueOnce(JSON.stringify(validResponse));  // 3. Retry call, succeeds
 
-        querier = new ZodLlmQuerier(mockAsk);
+        querier = createZodLlmQuerier({ ask: mockAsk });
 
         // Act
         const result = await querier.query(mainInstruction, userMessagePayload, PersonSchema, { maxRetries: 1 });
@@ -75,7 +75,7 @@ describe('ZodLlmQuerier', () => {
             .mockResolvedValueOnce(invalidJsonResponse) // Initial call returns broken JSON
             .mockResolvedValueOnce(fixedResponseString); // Fixer call returns valid JSON
 
-        querier = new ZodLlmQuerier(mockAsk);
+        querier = createZodLlmQuerier({ ask: mockAsk });
 
         // Act
         const result = await querier.query(mainInstruction, userMessagePayload, PersonSchema);
@@ -104,7 +104,7 @@ describe('ZodLlmQuerier', () => {
             .mockResolvedValueOnce("CANNOT_FIX")       // 2. Fixer call, fails to fix
             .mockResolvedValueOnce(JSON.stringify(validResponse)); // 3. Regular retry call, succeeds
 
-        querier = new ZodLlmQuerier(mockAsk);
+        querier = createZodLlmQuerier({ ask: mockAsk });
 
         // Act
         const result = await querier.query(mainInstruction, userMessagePayload, PersonSchema, { maxRetries: 1 });
