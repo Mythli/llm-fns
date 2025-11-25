@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { MockedFunction } from 'vitest';
-import { createZodLlmQuerier } from './zodLlmQuerier.js';
+import { createZodLlmQuerier } from './createZodLlmQuerier.js';
 import { z } from 'zod';
 import { AskGptFunction } from './createCachedGptAsk.js';
 
