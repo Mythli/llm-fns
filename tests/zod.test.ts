@@ -104,7 +104,7 @@ describe('Zod Structured Output Integration', () => {
             expect(mockPrompt).toHaveBeenCalledTimes(2);
             
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
-            expect(secondCallArgs.messages[1].content).toContain('SCHEMA_VALIDATION_ERROR');
+            expect(secondCallArgs.messages[1].content).toContain('Schema Validation Error');
         });
 
         it('should use the main retry loop when internal fixer is disabled', async () => {
