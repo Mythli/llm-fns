@@ -3,7 +3,7 @@ import { createTestLlm } from './setup.js';
 import crypto from 'crypto';
 
 describe('Basic LLM Integration', () => {
-    it('should generate text from a simple prompt', async () => {
+    it('should generate text from a simple prompt (Power User Interface)', async () => {
         const { llm } = await createTestLlm();
         
         const response = await llm.promptText({
@@ -13,6 +13,30 @@ describe('Basic LLM Integration', () => {
 
         expect(response).toBeTruthy();
         expect(response).toContain('Hello Integration Test');
+    });
+
+    it('should support the simplified string interface (One-Liner)', async () => {
+        const { llm } = await createTestLlm();
+        const response = await llm.promptText('Say "Simple String Interface"');
+        expect(response).toBeTruthy();
+        expect(response).toContain('Simple String Interface');
+    });
+
+    it('should support the simplified string interface with options', async () => {
+        const { llm } = await createTestLlm();
+        const response = await llm.promptText('Say "Options Interface"', { temperature: 0.1 });
+        expect(response).toBeTruthy();
+        expect(response).toContain('Options Interface');
+    });
+
+    it('should support the object interface with a string message', async () => {
+        const { llm } = await createTestLlm();
+        const response = await llm.promptText({
+            messages: 'Say "Object String Interface"',
+            temperature: 0,
+        });
+        expect(response).toBeTruthy();
+        expect(response).toContain('Object String Interface');
     });
 
     it('should cache responses', async () => {
