@@ -56,7 +56,7 @@ export interface CreateLlmRetryClientParams {
 
 function constructLlmMessages(
     mainInstruction: string,
-    userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+    userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
     attemptNumber: number,
     previousError?: LlmRetryAttemptError
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
@@ -90,7 +90,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     async function runPromptLoop<T>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
         processResponse: (response: any, info: LlmRetryResponseInfo) => Promise<T>,
         options: LlmRetryOptions | undefined,
         responseType: 'raw' | 'text' | 'image'
@@ -199,7 +199,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     async function promptRetry<T>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
         processResponse: (response: OpenAI.Chat.Completions.ChatCompletion, info: LlmRetryResponseInfo) => Promise<T>,
         options?: LlmRetryOptions
     ): Promise<T> {
@@ -208,7 +208,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     async function promptTextRetry<T>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
         processResponse: (response: string, info: LlmRetryResponseInfo) => Promise<T>,
         options?: LlmRetryOptions
     ): Promise<T> {
@@ -217,7 +217,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     async function promptImageRetry<T>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
         processResponse: (response: Buffer, info: LlmRetryResponseInfo) => Promise<T>,
         options?: LlmRetryOptions
     ): Promise<T> {

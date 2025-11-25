@@ -193,7 +193,7 @@ ${schemaJsonString}`;
 
     async function promptZod<T extends ZodTypeAny>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[], // Use OpenAI's type
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[], // Use OpenAI's type
         dataExtractionSchema: T,
         options?: ZodLlmClientOptions
     ): Promise<z.infer<T>> {
@@ -259,7 +259,7 @@ The response was valid JSON but did not conform to the required schema. Please r
 
     async function isPromptZodCached<T extends ZodTypeAny>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
         dataExtractionSchema: T,
         options?: ZodLlmClientOptions
     ): Promise<boolean> {

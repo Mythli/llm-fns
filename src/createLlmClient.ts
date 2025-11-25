@@ -183,7 +183,8 @@ export type OpenRouterResponseFormat =
  * These can override defaults or add call-specific parameters.
  * 'messages' is a required property, inherited from OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming.
  */
-export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'model' | 'response_format' | 'modalities'> {
+export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'model' | 'response_format' | 'modalities' | 'messages'> {
+    messages: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[];
     model?: ModelConfig;    // Allow overriding the default model for a specific call
     ttl?: number;      // Cache TTL in *MILLISECONDS* for this specific call, used if cache is enabled
     retries?: number;  // Number of retries for the API call.
@@ -215,10 +216,32 @@ export interface CreateLlmClientParams {
 export function createLlmClient(params: CreateLlmClientParams) {
     const { openai, cache: cacheInstance, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
 
+    function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): LlmPromptOptions {
+        if (typeof arg1 === 'string') {
+            return {
+                messages: [{ role: 'user', content: arg1 }],
+                ...arg2
+            };
+        }
+        const options = arg1;
+        if (typeof options.messages === 'string') {
+            return {
+                ...options,
+                messages: [{ role: 'user', content: options.messages }]
+            };
+        }
+        return options;
+    }
+
     const getCompletionParamsAndCacheKey = (options: LlmPromptOptions) => {
         const { ttl, model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
 
-        const finalMessages = maxConversationChars ? truncateMessages(messages, maxConversationChars) : messages;
+        // Ensure messages is an array (it should be if normalized, but for safety/types)
+        const messagesArray = typeof messages === 'string' 
+            ? [{ role: 'user', content: messages }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[]
+            : messages;
+
+        const finalMessages = maxConversationChars ? truncateMessages(messagesArray, maxConversationChars) : messagesArray;
 
         const baseConfig = typeof factoryDefaultModel === 'object' && factoryDefaultModel !== null
             ? factoryDefaultModel
@@ -252,7 +275,10 @@ export function createLlmClient(params: CreateLlmClientParams) {
         return { completionParams, cacheKey, ttl, modelToUse, finalMessages, retries };
     };
 
-    async function prompt(options: LlmPromptOptions): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    async function prompt(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion>;
+    async function prompt(options: LlmPromptOptions): Promise<OpenAI.Chat.Completions.ChatCompletion>;
+    async function prompt(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+        const options = normalizeOptions(arg1, arg2);
         const { completionParams, cacheKey, ttl, modelToUse, finalMessages, retries } = getCompletionParamsAndCacheKey(options);
 
         if (cacheInstance && cacheKey) {
@@ -302,7 +328,10 @@ export function createLlmClient(params: CreateLlmClientParams) {
         return apiCallAndCache();
     }
 
-    async function isPromptCached(options: LlmPromptOptions): Promise<boolean> {
+    async function isPromptCached(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<boolean>;
+    async function isPromptCached(options: LlmPromptOptions): Promise<boolean>;
+    async function isPromptCached(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<boolean> {
+        const options = normalizeOptions(arg1, arg2);
         const { cacheKey } = getCompletionParamsAndCacheKey(options);
         if (!cacheInstance || !cacheKey) {
             return false;
@@ -316,12 +345,18 @@ export function createLlmClient(params: CreateLlmClientParams) {
         }
     }
 
-    async function promptText(options: LlmPromptOptions): Promise<string | null> {
+    async function promptText(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<string | null>;
+    async function promptText(options: LlmPromptOptions): Promise<string | null>;
+    async function promptText(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<string | null> {
+        const options = normalizeOptions(arg1, arg2);
         const response = await prompt(options);
         return response.choices[0]?.message?.content || null;
     }
 
-    async function promptImage(options: LlmPromptOptions): Promise<Buffer | null> {
+    async function promptImage(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer | null>;
+    async function promptImage(options: LlmPromptOptions): Promise<Buffer | null>;
+    async function promptImage(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer | null> {
+        const options = normalizeOptions(arg1, arg2);
         const response = await prompt(options);
         const message = response.choices[0]?.message as any;
 
