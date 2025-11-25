@@ -208,6 +208,23 @@ export interface CreateLlmClientParams {
     queue?: PQueue;
 }
 
+export function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): LlmPromptOptions {
+    if (typeof arg1 === 'string') {
+        return {
+            messages: [{ role: 'user', content: arg1 }],
+            ...arg2
+        };
+    }
+    const options = arg1;
+    if (typeof options.messages === 'string') {
+        return {
+            ...options,
+            messages: [{ role: 'user', content: options.messages }]
+        };
+    }
+    return options;
+}
+
 /**
  * Factory function that creates a GPT "prompt" function, with optional caching.
  * @param params - The core dependencies (API key, base URL, default model, and optional cache instance).
@@ -215,23 +232,6 @@ export interface CreateLlmClientParams {
  */
 export function createLlmClient(params: CreateLlmClientParams) {
     const { openai, cache: cacheInstance, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
-
-    function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): LlmPromptOptions {
-        if (typeof arg1 === 'string') {
-            return {
-                messages: [{ role: 'user', content: arg1 }],
-                ...arg2
-            };
-        }
-        const options = arg1;
-        if (typeof options.messages === 'string') {
-            return {
-                ...options,
-                messages: [{ role: 'user', content: options.messages }]
-            };
-        }
-        return options;
-    }
 
     const getCompletionParamsAndCacheKey = (options: LlmPromptOptions) => {
         const { ttl, model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;

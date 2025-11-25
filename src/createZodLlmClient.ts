@@ -37,14 +37,14 @@ function isZodSchema(obj: any): obj is ZodTypeAny {
     );
 }
 
-interface NormalizedZodArgs<T extends ZodTypeAny> {
+export interface NormalizedZodArgs<T extends ZodTypeAny> {
     mainInstruction: string;
     userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[];
     dataExtractionSchema: T;
     options?: ZodLlmClientOptions;
 }
 
-function normalizeZodArgs<T extends ZodTypeAny>(
+export function normalizeZodArgs<T extends ZodTypeAny>(
     arg1: string | T,
     arg2?: string | OpenAI.Chat.Completions.ChatCompletionContentPart[] | T | ZodLlmClientOptions,
     arg3?: T | ZodLlmClientOptions,
