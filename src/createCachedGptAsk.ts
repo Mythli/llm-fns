@@ -1,7 +1,6 @@
 import crypto from 'crypto';
 import OpenAI from "openai";
 import { Cache } from 'cache-manager'; // Using Cache from cache-manager
-import { EventTracker } from './EventTracker.js';
 import PQueue from 'p-queue';
 import { executeWithRetry } from './retryUtils.js';
 
@@ -129,38 +128,6 @@ export function truncateMessages(messages: OpenAI.Chat.Completions.ChatCompletio
     return systemMessage ? [systemMessage, ...finalMessages] : finalMessages;
 }
 
-function concatMessageText(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): string {
-    const textParts: string[] = [];
-    for (const message of messages) {
-        if (message.content) {
-            if (typeof message.content === 'string') {
-                textParts.push(message.content);
-            } else if (Array.isArray(message.content)) {
-                for (const part of message.content) {
-                    if (part.type === 'text') {
-                        textParts.push(part.text);
-                    } else if (part.type === 'image_url') {
-                        textParts.push('[IMAGE]');
-                    }
-                }
-            }
-        }
-    }
-    return textParts.join(' ');
-}
-
-function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): string {
-    const fullText = concatMessageText(messages);
-    // Replace multiple whitespace chars with a single space and trim.
-    const cleanedText = fullText.replace(/\s+/g, ' ').trim();
-    // Truncate to a reasonable length.
-    const maxLength = 150;
-    if (cleanedText.length > maxLength) {
-        return cleanedText.substring(0, maxLength) + '...';
-    }
-    return cleanedText;
-}
-
 /**
  * The response format for OpenAI and OpenRouter.
  * OpenRouter extends this with 'json_schema'.
@@ -204,7 +171,6 @@ export interface CreateCachedGptAskParams {
     openai: OpenAI;
     cache?: Cache; // Cache instance is now optional. Expect a cache-manager compatible instance if provided.
     defaultModel: ModelConfig; // The default OpenAI model to use if not overridden in GptAskOptions
-    eventTracker?: EventTracker;
     maxConversationChars?: number;
     queue?: PQueue;
 }
@@ -215,7 +181,7 @@ export interface CreateCachedGptAskParams {
  * @returns An async function `gptAsk` ready to make OpenAI calls, with caching if configured.
  */
 export function createCachedGptAsk(params: CreateCachedGptAskParams) {
-    const { openai, cache: cacheInstance, defaultModel: factoryDefaultModel, eventTracker, maxConversationChars, queue } = params;
+    const { openai, cache: cacheInstance, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
 
     const getCompletionParamsAndCacheKey = (options: GptAskOptions) => {
         const { ttl, model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
@@ -291,10 +257,6 @@ export function createCachedGptAsk(params: CreateCachedGptAskParams) {
             return response;
         };
 
-        if (eventTracker) {
-            const promptSummary = getPromptSummary(finalMessages);
-            return eventTracker.trackOperation('gpt.ask', { model: modelToUse, prompt: promptSummary }, apiCallAndCache);
-        }
         return apiCallAndCache();
     }
 
