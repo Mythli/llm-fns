@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import OpenAI from "openai";
-import { Cache } from 'cache-manager'; // Using Cache from cache-manager
-import PQueue from 'p-queue';
+import type { Cache } from 'cache-manager'; // Using Cache from cache-manager
+import type PQueue from 'p-queue';
 import { executeWithRetry } from './retryUtils.js';
 
 export function countChars(message: OpenAI.Chat.Completions.ChatCompletionMessageParam): number {
