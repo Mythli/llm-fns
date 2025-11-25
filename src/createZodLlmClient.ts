@@ -1,6 +1,6 @@
 import OpenAI from 'openai'; // Import the OpenAI library
 import * as z from "zod";
-import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat } from "./createLlmClient.js";
+import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat, IsPromptCachedFunction } from "./createLlmClient.js";
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 import { ZodError, ZodTypeAny } from "zod";
 
@@ -23,12 +23,13 @@ export type ZodLlmClientOptions = Omit<LlmPromptOptions, 'messages' | 'response_
 
 export interface CreateZodLlmClientParams {
     prompt: PromptFunction;
+    isPromptCached: IsPromptCachedFunction;
     fallbackPrompt?: PromptFunction;
     disableJsonFixer?: boolean;
 }
 
 export function createZodLlmClient(params: CreateZodLlmClientParams) {
-    const { prompt, fallbackPrompt, disableJsonFixer = false } = params;
+    const { prompt, isPromptCached, fallbackPrompt, disableJsonFixer = false } = params;
     const llmRetryClient = createLlmRetryClient({ prompt, fallbackPrompt });
 
     async function _tryToFixJson(
@@ -163,12 +164,11 @@ ${brokenResponse}
         }
     }
 
-    async function promptZod<T extends ZodTypeAny>(
+    function _getZodPromptConfig<T extends ZodTypeAny>(
         mainInstruction: string,
-        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[], // Use OpenAI's type
         dataExtractionSchema: T,
         options?: ZodLlmClientOptions
-    ): Promise<z.infer<T>> {
+    ) {
         const schema = z.toJSONSchema(dataExtractionSchema, {
             unrepresentable: 'any'
         })
@@ -187,6 +187,21 @@ ${schemaJsonString}`;
         const response_format: OpenRouterResponseFormat | undefined = useResponseFormat
             ? { type: 'json_object' }
             : undefined;
+
+        return { finalMainInstruction, schemaJsonString, response_format };
+    }
+
+    async function promptZod<T extends ZodTypeAny>(
+        mainInstruction: string,
+        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[], // Use OpenAI's type
+        dataExtractionSchema: T,
+        options?: ZodLlmClientOptions
+    ): Promise<z.infer<T>> {
+        const { finalMainInstruction, schemaJsonString, response_format } = _getZodPromptConfig(
+            mainInstruction,
+            dataExtractionSchema,
+            options
+        );
 
         const retryOptions: LlmRetryOptions = {
             ...options,
@@ -242,5 +257,31 @@ The response was valid JSON but did not conform to the required schema. Please r
         );
     }
 
-    return { promptZod };
+    async function isPromptZodCached<T extends ZodTypeAny>(
+        mainInstruction: string,
+        userMessagePayload: OpenAI.Chat.Completions.ChatCompletionContentPart[],
+        dataExtractionSchema: T,
+        options?: ZodLlmClientOptions
+    ): Promise<boolean> {
+        const { finalMainInstruction, response_format } = _getZodPromptConfig(
+            mainInstruction,
+            dataExtractionSchema,
+            options
+        );
+
+        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+            { role: "system", content: finalMainInstruction },
+            { role: "user", content: userMessagePayload }
+        ];
+
+        const { maxRetries, useResponseFormat: _u, beforeValidation, ...restOptions } = options || {};
+
+        return isPromptCached({
+            messages,
+            response_format,
+            ...restOptions
+        });
+    }
+
+    return { promptZod, isPromptZodCached };
 }

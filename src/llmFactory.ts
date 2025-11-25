@@ -14,7 +14,8 @@ export function createLlm(params: CreateLlmFactoryParams) {
     });
 
     const zodClient = createZodLlmClient({
-        prompt: baseClient.prompt
+        prompt: baseClient.prompt,
+        isPromptCached: baseClient.isPromptCached
     });
 
     return {

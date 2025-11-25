@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { MockedFunction } from 'vitest';
 import { createZodLlmClient } from './createZodLlmClient.js';
 import { z } from 'zod';
-import { PromptFunction } from './createLlmClient.js';
+import { PromptFunction, IsPromptCachedFunction } from './createLlmClient.js';
 
 // Define a simple schema for testing
 const PersonSchema = z.object({
@@ -26,6 +26,7 @@ function createMockCompletion(content: string): any {
 describe('ZodLlmClient', () => {
     let client: ReturnType<typeof createZodLlmClient>;
     let mockPrompt: MockedFunction<PromptFunction>;
+    let mockIsPromptCached: MockedFunction<IsPromptCachedFunction>;
 
     const mainInstruction = 'Extract person details.';
     const userMessagePayload = [{ type: 'text' as const, text: 'The person is John Doe.' }];
@@ -33,6 +34,7 @@ describe('ZodLlmClient', () => {
     beforeEach(() => {
         // Create mock functions for each test
         mockPrompt = vi.fn();
+        mockIsPromptCached = vi.fn();
     });
 
     it('should return valid data on the first attempt (happy path)', async () => {
@@ -40,7 +42,7 @@ describe('ZodLlmClient', () => {
         const validResponse = { firstName: 'John', lastName: 'Doe' };
         // The mock needs to return a promise that resolves to the response object
         mockPrompt.mockResolvedValue(createMockCompletion(JSON.stringify(validResponse)));
-        client = createZodLlmClient({ prompt: mockPrompt });
+        client = createZodLlmClient({ prompt: mockPrompt, isPromptCached: mockIsPromptCached });
 
         // Act
         const result = await client.promptZod(mainInstruction, userMessagePayload, PersonSchema);
@@ -60,7 +62,7 @@ describe('ZodLlmClient', () => {
             .mockResolvedValueOnce(createMockCompletion("CANNOT_FIX"))    // 2. Fixer call, fails
             .mockResolvedValueOnce(createMockCompletion(JSON.stringify(validResponse)));  // 3. Retry call, succeeds
 
-        client = createZodLlmClient({ prompt: mockPrompt });
+        client = createZodLlmClient({ prompt: mockPrompt, isPromptCached: mockIsPromptCached });
 
         // Act
         const result = await client.promptZod(mainInstruction, userMessagePayload, PersonSchema, { maxRetries: 1 });
@@ -88,7 +90,7 @@ describe('ZodLlmClient', () => {
             .mockResolvedValueOnce(createMockCompletion(invalidJsonResponse)) // Initial call returns broken JSON
             .mockResolvedValueOnce(createMockCompletion(fixedResponseString)); // Fixer call returns valid JSON
 
-        client = createZodLlmClient({ prompt: mockPrompt });
+        client = createZodLlmClient({ prompt: mockPrompt, isPromptCached: mockIsPromptCached });
 
         // Act
         const result = await client.promptZod(mainInstruction, userMessagePayload, PersonSchema);
@@ -117,7 +119,7 @@ describe('ZodLlmClient', () => {
             .mockResolvedValueOnce(createMockCompletion("CANNOT_FIX"))       // 2. Fixer call, fails to fix
             .mockResolvedValueOnce(createMockCompletion(JSON.stringify(validResponse))); // 3. Regular retry call, succeeds
 
-        client = createZodLlmClient({ prompt: mockPrompt });
+        client = createZodLlmClient({ prompt: mockPrompt, isPromptCached: mockIsPromptCached });
 
         // Act
         const result = await client.promptZod(mainInstruction, userMessagePayload, PersonSchema, { maxRetries: 1 });
@@ -132,5 +134,24 @@ describe('ZodLlmClient', () => {
         expect(retryMessages).toHaveLength(4); // system, user, assistant, user (retry)
         expect(retryMessages[3].content).toContain('Your previous response resulted in an error');
         expect(retryMessages[3].content).toContain('JSON_PARSE_ERROR');
+    });
+
+    it('should check if prompt is cached', async () => {
+        // Arrange
+        mockIsPromptCached.mockResolvedValue(true);
+        client = createZodLlmClient({ prompt: mockPrompt, isPromptCached: mockIsPromptCached });
+
+        // Act
+        const isCached = await client.isPromptZodCached(mainInstruction, userMessagePayload, PersonSchema);
+
+        // Assert
+        expect(isCached).toBe(true);
+        expect(mockIsPromptCached).toHaveBeenCalledTimes(1);
+        
+        const callArgs = mockIsPromptCached.mock.calls[0][0];
+        expect(callArgs.messages).toHaveLength(2);
+        expect(callArgs.messages[0].role).toBe('system');
+        expect(callArgs.messages[0].content).toContain('JSON schema:');
+        expect(callArgs.response_format).toEqual({ type: 'json_object' });
     });
 });
