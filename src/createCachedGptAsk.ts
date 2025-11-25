@@ -274,8 +274,35 @@ export function createCachedGptAsk(params: CreateCachedGptAskParams) {
         }
     }
 
-    return { ask: gptAsk, isAskCached };
+    async function askText(options: GptAskOptions): Promise<string | null> {
+        const response = await gptAsk(options);
+        return response.choices[0]?.message?.content || null;
+    }
+
+    async function askImage(options: GptAskOptions): Promise<Buffer | null> {
+        const response = await gptAsk(options);
+        const message = response.choices[0]?.message as any;
+
+        if (message.images && Array.isArray(message.images) && message.images.length > 0) {
+            const imageUrl = message.images[0].image_url.url;
+            if (typeof imageUrl === 'string') {
+                if (imageUrl.startsWith('http')) {
+                    const imgRes = await fetch(imageUrl);
+                    const arrayBuffer = await imgRes.arrayBuffer();
+                    return Buffer.from(arrayBuffer);
+                } else {
+                    const base64Data = imageUrl.replace(/^data:image\/\w+;base64,/, "");
+                    return Buffer.from(base64Data, 'base64');
+                }
+            }
+        }
+        return null;
+    }
+
+    return { ask: gptAsk, isAskCached, askText, askImage };
 }
 
 export type AskGptFunction = ReturnType<typeof createCachedGptAsk>['ask'];
 export type IsAskCachedFunction = ReturnType<typeof createCachedGptAsk>['isAskCached'];
+export type AskTextFunction = ReturnType<typeof createCachedGptAsk>['askText'];
+export type AskImageFunction = ReturnType<typeof createCachedGptAsk>['askImage'];
