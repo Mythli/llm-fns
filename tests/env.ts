@@ -8,7 +8,7 @@ const envSchema = z.object({
     // Optional override for base URL (e.g. for OpenRouter or local proxies)
     OPENAI_BASE_URL: z.string().url().optional(),
     // Model to use for testing. Defaults to a cheaper model.
-    TEST_MODEL: z.string().default("gpt-4o-mini"),
+    TEST_MODEL: z.string().default("openai/gpt-oss-120b"),
 });
 
 export const env = envSchema.parse(process.env);
