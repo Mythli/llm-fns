@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { createCache } from 'cache-manager';
+import KeyvSqlite from '@keyv/sqlite';
 import { createLlm } from '../src/llmFactory.js';
 import { env } from './env.js';
 
@@ -9,8 +10,9 @@ export async function createTestLlm() {
         baseURL: env.OPENAI_BASE_URL,
     });
 
-    // Create a memory cache for testing
-    const cache = createCache();
+    // Create a SQLite cache for testing
+    const sqliteStore = new KeyvSqlite('sqlite://test-cache.sqlite');
+    const cache = createCache({ stores: [sqliteStore as any] });
 
     const llm = createLlm({
         openai,

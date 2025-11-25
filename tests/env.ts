@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 
+// Load .env.test explicitly if available, falling back to .env
+dotenv.config({ path: '.env.test' });
 dotenv.config();
 
 const envSchema = z.object({
