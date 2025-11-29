@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "release": "scripts/release",
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +22,7 @@
     "cache-manager": "^7.2.5",
     "dotenv": "^16.6.1",
     "p-queue": "^9.0.1",
+    "typescript": "^5.9.3",
     "vitest": "^1.2.1"
   },
   "pnpm": {
