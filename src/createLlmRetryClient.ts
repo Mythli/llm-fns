@@ -210,14 +210,14 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
         return runPromptLoop(options, 'raw');
     }
 
-    async function promptTextRetry<T = string | null>(
+    async function promptTextRetry<T = string>(
         content: string,
         options?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T>;
-    async function promptTextRetry<T = string | null>(
+    async function promptTextRetry<T = string>(
         options: LlmRetryOptions<T>
     ): Promise<T>;
-    async function promptTextRetry<T = string | null>(
+    async function promptTextRetry<T = string>(
         arg1: string | LlmRetryOptions<T>,
         arg2?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T> {
@@ -225,14 +225,14 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
         return runPromptLoop(options, 'text');
     }
 
-    async function promptImageRetry<T = Buffer | null>(
+    async function promptImageRetry<T = Buffer>(
         content: string,
         options?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T>;
-    async function promptImageRetry<T = Buffer | null>(
+    async function promptImageRetry<T = Buffer>(
         options: LlmRetryOptions<T>
     ): Promise<T>;
-    async function promptImageRetry<T = Buffer | null>(
+    async function promptImageRetry<T = Buffer>(
         arg1: string | LlmRetryOptions<T>,
         arg2?: Omit<LlmRetryOptions<T>, 'messages'>
     ): Promise<T> {

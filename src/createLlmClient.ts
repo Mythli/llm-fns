@@ -345,17 +345,21 @@ export function createLlmClient(params: CreateLlmClientParams) {
         }
     }
 
-    async function promptText(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<string | null>;
-    async function promptText(options: LlmPromptOptions): Promise<string | null>;
-    async function promptText(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<string | null> {
+    async function promptText(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<string>;
+    async function promptText(options: LlmPromptOptions): Promise<string>;
+    async function promptText(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<string> {
         const options = normalizeOptions(arg1, arg2);
         const response = await prompt(options);
-        return response.choices[0]?.message?.content || null;
+        const content = response.choices[0]?.message?.content;
+        if (content === null || content === undefined) {
+            throw new Error("LLM returned no text content.");
+        }
+        return content;
     }
 
-    async function promptImage(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer | null>;
-    async function promptImage(options: LlmPromptOptions): Promise<Buffer | null>;
-    async function promptImage(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer | null> {
+    async function promptImage(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer>;
+    async function promptImage(options: LlmPromptOptions): Promise<Buffer>;
+    async function promptImage(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer> {
         const options = normalizeOptions(arg1, arg2);
         const response = await prompt(options);
         const message = response.choices[0]?.message as any;
@@ -373,7 +377,7 @@ export function createLlmClient(params: CreateLlmClientParams) {
                 }
             }
         }
-        return null;
+        throw new Error("LLM returned no image content.");
     }
 
     return { prompt, isPromptCached, promptText, promptImage };
