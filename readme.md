@@ -1,6 +1,8 @@
 # LLM Client Wrapper for OpenAI
 
-A generic, type-safe wrapper around the OpenAI API. It abstracts away the boilerplate (parsing, retries, caching) while allowing raw access when needed.
+A generic, type-safe wrapper around the OpenAI API. It abstracts away the boilerplate (parsing, retries, caching, logging) while allowing raw access when needed. 
+
+Designed for power users who need to switch between simple string prompts and complex, resilient agentic workflows.
 
 ## Installation
 
@@ -9,6 +11,8 @@ npm install openai zod cache-manager p-queue
 ```
 
 ## Quick Start (Factory)
+
+The `createLlm` factory bundles all functionality (Basic, Retry, Zod) into a single client.
 
 ```typescript
 import OpenAI from 'openai';
@@ -19,7 +23,10 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const llm = createLlm({
     openai,
     defaultModel: 'google/gemini-3-pro-preview',
-    // optional: cache: ..., queue: ...
+    // optional: 
+    // cache: Cache instance (cache-manager)
+    // queue: PQueue instance for concurrency control
+    // maxConversationChars: number (auto-truncation)
 });
 ```
 
@@ -29,6 +36,8 @@ const llm = createLlm({
 
 ### Level 1: The Easy Way (String Output)
 Use `promptText` when you just want the answer as a string.
+
+**Return Type:** `Promise<string>`
 
 ```typescript
 // 1. Simple User Question
@@ -45,7 +54,9 @@ const ans3 = await llm.promptText([
 ```
 
 ### Level 2: The Raw Object (Shortcuts)
-Use `prompt` when you need the **Full OpenAI Response** (`usage`, `id`, `choices`...) but want to use the **Simple Inputs** from Level 1.
+Use `prompt` when you need the **Full OpenAI Response** (`usage`, `id`, `choices`, `finish_reason`) but want to use the **Simple Inputs** from Level 1.
+
+**Return Type:** `Promise<OpenAI.Chat.Completions.ChatCompletion>`
 
 ```typescript
 // Shortcut A: Single String -> User Message
@@ -62,17 +73,20 @@ const res2 = await llm.prompt(
 ### Level 3: Full Control (Config Object)
 Use the **Config Object** overload for absolute control. This allows you to mix Standard OpenAI flags with Library flags.
 
+**Input Type:** `LlmPromptOptions`
+
 ```typescript
 const res = await llm.prompt({
-    // Standard OpenAI
+    // Standard OpenAI params
     messages: [{ role: "user", content: "Hello" }],
     temperature: 1.5,
     frequency_penalty: 0.2,
+    max_tokens: 100,
     
     // Library Extensions
-    ttl: 5000,          // Cache this specific call for 5s
+    model: "gpt-4o",    // Override default model for this call
+    ttl: 5000,          // Cache this specific call for 5s (in ms)
     retries: 5,         // Retry network errors 5 times
-    timeout: 10000,     // Kill request after 10s
 });
 ```
 
@@ -81,6 +95,8 @@ const res = await llm.prompt({
 # Use Case 2: Images (`llm.promptImage`)
 
 Generates an image and returns it as a `Buffer`. This handles the fetching of the URL or Base64 decoding automatically.
+
+**Return Type:** `Promise<Buffer>`
 
 ```typescript
 // 1. Simple Generation
@@ -100,6 +116,10 @@ const buffer2 = await llm.promptImage({
 ---
 
 # Use Case 3: Structured Data (`llm.promptZod`)
+
+This is a high-level wrapper that employs a **Re-asking Loop**. If the LLM outputs invalid JSON or data that fails the Zod schema validation, the client automatically feeds the error back to the LLM and asks it to fix it (up to `maxRetries`).
+
+**Return Type:** `Promise<z.infer<typeof Schema>>`
 
 ### Level 1: Generation (Schema Only)
 The client "hallucinates" data matching the shape.
@@ -133,6 +153,8 @@ const analysis = await llm.promptZod(
 ### Level 3: State & Options (History + Config)
 Process full chat history into state, and use the **Options Object (4th Argument)** to control the internals (Models, Retries, Caching).
 
+**Input Type:** `ZodLlmClientOptions`
+
 ```typescript
 const history = [
     { role: "user", content: "I cast Fireball." },
@@ -145,7 +167,8 @@ const gameState = await llm.promptZod(
     {                    // Arg 3: Options Override
         model: "google/gemini-flash-1.5", 
         disableJsonFixer: true, // Turn off the automatic JSON repair agent
-        retries: 0              // Fail immediately on error
+        maxRetries: 0,          // Fail immediately on error
+        ttl: 60000              // Cache result
     }
 );
 ```
@@ -164,6 +187,7 @@ const result = await llm.promptZod(MySchema, {
     },
     
     // Toggle usage of 'response_format: { type: "json_object" }'
+    // Sometimes strict JSON mode is too restrictive for creative tasks
     useResponseFormat: false 
 });
 ```
@@ -174,6 +198,8 @@ const result = await llm.promptZod(MySchema, {
 
 The library exposes the "Conversational Retry" engine used internally by `promptZod`. You can provide a `validate` function. If it throws a `LlmRetryError`, the error message is fed back to the LLM, and it tries again.
 
+**Return Type:** `Promise<string>` (or generic `<T>`)
+
 ```typescript
 import { LlmRetryError } from './src';
 
@@ -182,6 +208,7 @@ const poem = await llm.promptTextRetry({
     maxRetries: 3,
     validate: async (text, info) => {
         // 'info' contains history and attempt number
+        // info: { attemptNumber: number, conversation: [...], mode: 'main'|'fallback' }
         
         if (!text.toLowerCase().includes("bug")) {
             // This message goes back to the LLM:
@@ -241,10 +268,8 @@ const smartClient = createZodLlmClient({
     isPromptCached: cheapClient.isPromptCached,
 
     // Fallback Strategy: Switch to Strong/Expensive
+    // This is triggered if the Primary Strategy exhausts its retries or validation fails
     fallbackPrompt: strongClient.prompt,
-    
-    // Optional: Hook to log when a fallback happens
-    onFallback: (error) => console.warn("Upgrading model due to:", error)
 });
 
 // Usage acts exactly like the standard client
@@ -256,6 +281,8 @@ await smartClient.promptZod(MySchema);
 # Utilities: Cache Inspection
 
 Check if a specific prompt is already cached without making an API call (or partial cache check for Zod calls).
+
+**Return Type:** `Promise<boolean>`
 
 ```typescript
 const options = { messages: "Compare 5000 files..." };
