@@ -152,12 +152,21 @@ function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessag
     const fullText = concatMessageText(messages);
     // Replace multiple whitespace chars with a single space and trim.
     const cleanedText = fullText.replace(/\s+/g, ' ').trim();
-    // Truncate to a reasonable length.
-    const maxLength = 150;
-    if (cleanedText.length > maxLength) {
-        return cleanedText.substring(0, maxLength) + '...';
+    
+    if (cleanedText.length <= 50) {
+        return cleanedText;
     }
-    return cleanedText;
+
+    const partLength = 15;
+    const start = cleanedText.substring(0, partLength);
+    const end = cleanedText.substring(cleanedText.length - partLength);
+    
+    const midIndex = Math.floor(cleanedText.length / 2);
+    const midStart = Math.max(partLength, midIndex - Math.ceil(partLength / 2));
+    const midEnd = Math.min(cleanedText.length - partLength, midStart + partLength);
+    const middle = cleanedText.substring(midStart, midEnd);
+
+    return `${start}...${middle}...${end}`;
 }
 
 /**
@@ -313,7 +322,7 @@ export function createLlmClient(params: CreateLlmClientParams) {
                 }
             );
 
-            const response = (await (queue ? queue.add(task, { id: promptSummary } as any) : task())) as OpenAI.Chat.Completions.ChatCompletion;
+            const response = (await (queue ? queue.add(task, { id: promptSummary, messages: finalMessages } as any) : task())) as OpenAI.Chat.Completions.ChatCompletion;
 
             if (cacheInstance && response && cacheKey) {
                 try {
