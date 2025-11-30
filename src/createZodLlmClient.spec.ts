@@ -95,6 +95,23 @@ describe('normalizeZodArgs', () => {
         expect(result.options).toBe(options);
     });
 
+    it('should normalize Messages Array with few-shot examples + Schema (Case 0)', () => {
+        const messages = [
+            { role: 'system', content: 'Extract sentiment.' },
+            { role: 'user', content: 'I love this!' },
+            { role: 'assistant', content: JSON.stringify({ sentiment: 'positive' }) },
+            { role: 'user', content: 'I hate this.' }
+        ] as any;
+        
+        const Schema = z.object({ sentiment: z.enum(['positive', 'negative']) });
+        
+        const result = normalizeZodArgs(messages, Schema);
+        
+        expect(result.messages).toBe(messages);
+        expect(result.dataExtractionSchema).toBe(Schema);
+        expect(result.options).toBeUndefined();
+    });
+
     it('should throw error for invalid arguments', () => {
         expect(() => normalizeZodArgs({} as any)).toThrow('Invalid arguments');
     });
