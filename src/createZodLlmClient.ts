@@ -38,23 +38,33 @@ function isZodSchema(obj: any): obj is ZodTypeAny {
 }
 
 export interface NormalizedZodArgs<T extends ZodTypeAny> {
-    mainInstruction: string;
-    userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[];
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
     dataExtractionSchema: T;
     options?: ZodLlmClientOptions;
 }
 
 export function normalizeZodArgs<T extends ZodTypeAny>(
-    arg1: string | T,
+    arg1: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[] | T,
     arg2?: string | OpenAI.Chat.Completions.ChatCompletionContentPart[] | T | ZodLlmClientOptions,
     arg3?: T | ZodLlmClientOptions,
     arg4?: ZodLlmClientOptions
 ): NormalizedZodArgs<T> {
+    // Case 0: promptZod(messages[], schema, options?)
+    if (Array.isArray(arg1)) {
+        return {
+            messages: arg1 as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+            dataExtractionSchema: arg2 as T,
+            options: arg3 as ZodLlmClientOptions | undefined
+        };
+    }
+
     if (isZodSchema(arg1)) {
         // Case 1: promptZod(schema, options?)
         return {
-            mainInstruction: "Generate a valid JSON object based on the schema.",
-            userMessagePayload: "Generate the data.",
+            messages: [
+                { role: 'system', content: "Generate a valid JSON object based on the schema." },
+                { role: 'user', content: "Generate the data." }
+            ],
             dataExtractionSchema: arg1,
             options: arg2 as ZodLlmClientOptions | undefined
         };
@@ -64,8 +74,10 @@ export function normalizeZodArgs<T extends ZodTypeAny>(
         if (isZodSchema(arg2)) {
             // Case 2: promptZod(prompt, schema, options?)
             return {
-                mainInstruction: "You are a helpful assistant that outputs JSON matching the provided schema.",
-                userMessagePayload: arg1,
+                messages: [
+                    { role: 'system', content: "You are a helpful assistant that outputs JSON matching the provided schema." },
+                    { role: 'user', content: arg1 }
+                ],
                 dataExtractionSchema: arg2 as T,
                 options: arg3 as ZodLlmClientOptions | undefined
             };
@@ -73,8 +85,10 @@ export function normalizeZodArgs<T extends ZodTypeAny>(
 
         // Case 3: promptZod(system, user, schema, options?)
         return {
-            mainInstruction: arg1,
-            userMessagePayload: arg2 as string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
+            messages: [
+                { role: 'system', content: arg1 },
+                { role: 'user', content: arg2 as string | OpenAI.Chat.Completions.ChatCompletionContentPart[] }
+            ],
             dataExtractionSchema: arg3 as T,
             options: arg4
         };
@@ -220,7 +234,7 @@ ${brokenResponse}
     }
 
     function _getZodPromptConfig<T extends ZodTypeAny>(
-        mainInstruction: string,
+        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         dataExtractionSchema: T,
         options?: ZodLlmClientOptions
     ) {
@@ -236,17 +250,41 @@ Do NOT include any other text, explanations, or markdown formatting (like \`\`\`
 JSON schema:
 ${schemaJsonString}`;
 
-        const finalMainInstruction = `${mainInstruction}\n${commonPromptFooter}`;
+        // Clone messages to avoid mutating the input
+        const finalMessages = [...messages];
+
+        // Find the first system message to append instructions to
+        const systemMessageIndex = finalMessages.findIndex(m => m.role === 'system');
+
+        if (systemMessageIndex !== -1) {
+            // Append to existing system message
+            const existingContent = finalMessages[systemMessageIndex].content;
+            finalMessages[systemMessageIndex] = {
+                ...finalMessages[systemMessageIndex],
+                content: `${existingContent}\n${commonPromptFooter}`
+            };
+        } else {
+            // Prepend new system message
+            finalMessages.unshift({
+                role: 'system',
+                content: commonPromptFooter
+            });
+        }
 
         const useResponseFormat = options?.useResponseFormat ?? true;
         const response_format: OpenRouterResponseFormat | undefined = useResponseFormat
             ? { type: 'json_object' }
             : undefined;
 
-        return { finalMainInstruction, schemaJsonString, response_format };
+        return { finalMessages, schemaJsonString, response_format };
     }
 
     async function promptZod<T extends ZodTypeAny>(
+        schema: T,
+        options?: ZodLlmClientOptions
+    ): Promise<z.infer<T>>;
+    async function promptZod<T extends ZodTypeAny>(
+        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         schema: T,
         options?: ZodLlmClientOptions
     ): Promise<z.infer<T>>;
@@ -262,15 +300,15 @@ ${schemaJsonString}`;
         options?: ZodLlmClientOptions
     ): Promise<z.infer<T>>;
     async function promptZod<T extends ZodTypeAny>(
-        arg1: string | T,
+        arg1: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[] | T,
         arg2?: string | OpenAI.Chat.Completions.ChatCompletionContentPart[] | T | ZodLlmClientOptions,
         arg3?: T | ZodLlmClientOptions,
         arg4?: ZodLlmClientOptions
     ): Promise<z.infer<T>> {
-        const { mainInstruction, userMessagePayload, dataExtractionSchema, options } = normalizeZodArgs(arg1, arg2, arg3, arg4);
+        const { messages, dataExtractionSchema, options } = normalizeZodArgs(arg1, arg2, arg3, arg4);
 
-        const { finalMainInstruction, schemaJsonString, response_format } = _getZodPromptConfig(
-            mainInstruction,
+        const { finalMessages, schemaJsonString, response_format } = _getZodPromptConfig(
+            messages,
             dataExtractionSchema,
             options
         );
@@ -315,14 +353,9 @@ The response was valid JSON but did not conform to the required schema. Please r
             }
         };
 
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: "system", content: finalMainInstruction },
-            { role: "user", content: userMessagePayload }
-        ];
-
         const retryOptions: LlmRetryOptions<z.infer<T>> = {
             ...options,
-            messages,
+            messages: finalMessages,
             response_format,
             validate: processResponse
         };
@@ -332,6 +365,11 @@ The response was valid JSON but did not conform to the required schema. Please r
     }
 
     async function isPromptZodCached<T extends ZodTypeAny>(
+        schema: T,
+        options?: ZodLlmClientOptions
+    ): Promise<boolean>;
+    async function isPromptZodCached<T extends ZodTypeAny>(
+        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         schema: T,
         options?: ZodLlmClientOptions
     ): Promise<boolean>;
@@ -347,28 +385,23 @@ The response was valid JSON but did not conform to the required schema. Please r
         options?: ZodLlmClientOptions
     ): Promise<boolean>;
     async function isPromptZodCached<T extends ZodTypeAny>(
-        arg1: string | T,
+        arg1: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[] | T,
         arg2?: string | OpenAI.Chat.Completions.ChatCompletionContentPart[] | T | ZodLlmClientOptions,
         arg3?: T | ZodLlmClientOptions,
         arg4?: ZodLlmClientOptions
     ): Promise<boolean> {
-        const { mainInstruction, userMessagePayload, dataExtractionSchema, options } = normalizeZodArgs(arg1, arg2, arg3, arg4);
+        const { messages, dataExtractionSchema, options } = normalizeZodArgs(arg1, arg2, arg3, arg4);
 
-        const { finalMainInstruction, response_format } = _getZodPromptConfig(
-            mainInstruction,
+        const { finalMessages, response_format } = _getZodPromptConfig(
+            messages,
             dataExtractionSchema,
             options
         );
 
-        const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-            { role: "system", content: finalMainInstruction },
-            { role: "user", content: userMessagePayload }
-        ];
-
         const { maxRetries, useResponseFormat: _u, beforeValidation, ...restOptions } = options || {};
 
         return isPromptCached({
-            messages,
+            messages: finalMessages,
             response_format,
             ...restOptions
         });
