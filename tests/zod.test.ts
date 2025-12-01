@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { createTestLlm } from './setup.js';
 import { createZodLlmClient } from '../src/createZodLlmClient.js';
+import { createJsonSchemaLlmClient } from '../src/createJsonSchemaLlmClient.js';
 import { LlmRetryExhaustedError } from '../src/createLlmRetryClient.js';
 
 // Helper to create a mock prompt function
@@ -71,9 +72,13 @@ describe('Zod Structured Output Integration', () => {
                 '{"age": 20}' // Fixed
             ]);
 
-            const client = createZodLlmClient({
+            const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
                 isPromptCached: async () => false,
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
             });
 
             const result = await client.promptZod("test", "test", Schema);
@@ -93,9 +98,13 @@ describe('Zod Structured Output Integration', () => {
                 '{"age": 20}'        // Fixed
             ]);
 
-            const client = createZodLlmClient({
+            const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
                 isPromptCached: async () => false,
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
             });
 
             const result = await client.promptZod("test", "test", Schema);
@@ -113,10 +122,14 @@ describe('Zod Structured Output Integration', () => {
                 '{"age": 20}'       // Corrected in next turn
             ]);
 
-            const client = createZodLlmClient({
+            const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
                 isPromptCached: async () => false,
                 disableJsonFixer: true // Force main loop
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
             });
 
             const result = await client.promptZod("test", "test", Schema);
@@ -142,11 +155,15 @@ describe('Zod Structured Output Integration', () => {
                 '{"age": 20}' // Succeeds
             ]);
 
-            const client = createZodLlmClient({
+            const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockMainPrompt,
                 fallbackPrompt: mockFallbackPrompt,
                 isPromptCached: async () => false,
                 disableJsonFixer: true // Force error to retry loop immediately
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
             });
 
             const result = await client.promptZod("test", "test", Schema);
@@ -163,10 +180,14 @@ describe('Zod Structured Output Integration', () => {
                 '{"age": "forever wrong"}'
             ]);
 
-            const client = createZodLlmClient({
+            const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
                 isPromptCached: async () => false,
                 disableJsonFixer: true
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
             });
 
             await expect(client.promptZod("test", "test", Schema, { maxRetries: 1 }))
