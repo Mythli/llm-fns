@@ -110,5 +110,29 @@ describe('JSON Schema Structured Output Integration', () => {
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
             expect(secondCallArgs.messages[1].content).toContain('Schema Validation Error');
         });
+
+        it('should reproduce "validator is not a function" error when validator is undefined', async () => {
+            const mockPrompt = createMockPrompt(['{"age": 20}']);
+            const client = createJsonSchemaLlmClient({
+                prompt: mockPrompt,
+                isPromptCached: async () => false,
+                disableJsonFixer: true // Fail fast to see the error
+            });
+
+            // We expect this to fail because promptJson expects a validator function,
+            // but we are passing undefined (simulating the user's issue).
+            try {
+                await client.promptJson(
+                    [{ role: 'user', content: "test" }],
+                    schema,
+                    undefined as any
+                );
+                throw new Error("Should have failed");
+            } catch (error: any) {
+                // The error message constructed in promptJson includes the details
+                expect(error.message).toContain('validator is not a function');
+                expect(error.message).toContain('SCHEMA_VALIDATION_ERROR');
+            }
+        });
     });
 });
