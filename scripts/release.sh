@@ -7,6 +7,11 @@ VERSION_TYPE=${1:-patch}
 echo "🚀 Starting release process..."
 echo "📦 Version bump type: $VERSION_TYPE"
 
+# 0. Build
+echo ""
+echo "🔨 Step 0: Testing..."
+pnpm run test
+
 # 1. Build
 echo ""
 echo "🔨 Step 1: Building..."
