@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import Ajv from 'ajv';
 import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat, IsPromptCachedFunction } from "./createLlmClient.js";
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 
@@ -29,6 +30,7 @@ export interface CreateJsonSchemaLlmClientParams {
 export function createJsonSchemaLlmClient(params: CreateJsonSchemaLlmClientParams) {
     const { prompt, isPromptCached, fallbackPrompt, disableJsonFixer = false } = params;
     const llmRetryClient = createLlmRetryClient({ prompt, fallbackPrompt });
+    const ajv = new Ajv({ strict: false }); // Initialize AJV
 
     async function _tryToFixJson(
         brokenResponse: string,
@@ -208,9 +210,20 @@ ${schemaJsonString}`;
     async function promptJson<T>(
         messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         schema: Record<string, any>,
-        validator: (data: any) => T,
+        validator?: (data: any) => T,
         options?: JsonSchemaLlmClientOptions
     ): Promise<T> {
+        // If no validator is provided, use AJV to validate against the schema
+        const effectiveValidator = validator || ((data: any) => {
+            const validate = ajv.compile(schema);
+            const valid = validate(data);
+            if (!valid) {
+                const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
+                throw new Error(`AJV Validation Error: ${errors}`);
+            }
+            return data as T;
+        });
+
         const { finalMessages, schemaJsonString, response_format } = _getJsonPromptConfig(
             messages,
             schema,
@@ -235,7 +248,7 @@ The response provided was not valid JSON. Please correct it.`;
             }
 
             try {
-                const validatedData = await _validateOrFix(jsonData, validator, schemaJsonString, options);
+                const validatedData = await _validateOrFix(jsonData, effectiveValidator, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
                 // We assume the validator throws an error with a meaningful message
