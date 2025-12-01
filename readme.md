@@ -115,47 +115,50 @@ const buffer2 = await llm.promptImage({
 
 ---
 
-# Use Case 3: Structured Data (`llm.promptZod`)
+# Use Case 3: Structured Data (`llm.promptJson` & `llm.promptZod`)
 
-This is a high-level wrapper that employs a **Re-asking Loop**. If the LLM outputs invalid JSON or data that fails the Zod schema validation, the client automatically feeds the error back to the LLM and asks it to fix it (up to `maxRetries`).
+This is a high-level wrapper that employs a **Re-asking Loop**. If the LLM outputs invalid JSON or data that fails the schema validation, the client automatically feeds the error back to the LLM and asks it to fix it (up to `maxRetries`).
+
+**Return Type:** `Promise<T>`
+
+### Level 1: Raw JSON Schema (`promptJson`)
+Use this if you have a standard JSON Schema object (e.g. from another library or API) and don't want to use Zod.
+
+```typescript
+const MySchema = {
+    type: "object",
+    properties: {
+        sentiment: { type: "string", enum: ["positive", "negative"] },
+        score: { type: "number" }
+    },
+    required: ["sentiment", "score"],
+    additionalProperties: false
+};
+
+const result = await llm.promptJson(
+    [{ role: "user", content: "I love this!" }],
+    MySchema,
+    (data) => data // Optional validator function
+);
+```
+
+### Level 2: Zod Wrapper (`promptZod`)
+This is syntactic sugar over `promptJson`. It converts your Zod schema to JSON Schema and automatically sets up the validator to throw formatted Zod errors for the retry loop.
 
 **Return Type:** `Promise<z.infer<typeof Schema>>`
-
-### Level 1: Generation (Schema Only)
-The client "hallucinates" data matching the shape.
 
 ```typescript
 import { z } from 'zod';
 const UserSchema = z.object({ name: z.string(), age: z.number() });
 
-// Input: Schema only
+// 1. Schema Only (Hallucinate data)
 const user = await llm.promptZod(UserSchema);
-// Output: { name: "Alice", age: 32 }
-```
 
-### Level 2: Extraction (Injection Shortcuts)
-Pass context alongside the schema. This automates the "System Prompt JSON Injection".
-
-```typescript
-// 1. Extract from String
+// 2. Extraction (Context + Schema)
 const email = "Meeting at 2 PM with Bob.";
 const event = await llm.promptZod(email, z.object({ time: z.string(), who: z.string() }));
 
-// 2. Strict Separation (System, User, Schema)
-// Useful for auditing code or translations where instructions must not bleed into data.
-const analysis = await llm.promptZod(
-    "You are a security auditor.", // Arg 1: System
-    "function dangerous() {}",     // Arg 2: User Data
-    SecuritySchema                 // Arg 3: Schema
-);
-```
-
-### Level 3: State & Options (History + Config)
-Process full chat history into state, and use the **Options Object (4th Argument)** to control the internals (Models, Retries, Caching).
-
-**Input Type:** `ZodLlmClientOptions`
-
-```typescript
+// 3. Full Control (History + Schema + Options)
 const history = [
     { role: "user", content: "I cast Fireball." },
     { role: "assistant", content: "It misses." }
@@ -173,12 +176,12 @@ const gameState = await llm.promptZod(
 );
 ```
 
-### Level 4: Hooks & Pre-processing
-Sometimes LLMs output data that is *almost* correct (e.g., strings for numbers). You can sanitize data before Zod validation runs.
+### Level 3: Hooks & Pre-processing
+Sometimes LLMs output data that is *almost* correct (e.g., strings for numbers). You can sanitize data before validation runs.
 
 ```typescript
 const result = await llm.promptZod(MySchema, {
-    // Transform JSON before Zod validation runs
+    // Transform JSON before validation runs
     beforeValidation: (data) => {
         if (data.price && typeof data.price === 'string') {
             return { ...data, price: parseFloat(data.price) };
@@ -187,7 +190,6 @@ const result = await llm.promptZod(MySchema, {
     },
     
     // Toggle usage of 'response_format: { type: "json_object" }'
-    // Sometimes strict JSON mode is too restrictive for creative tasks
     useResponseFormat: false 
 });
 ```
