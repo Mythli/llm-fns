@@ -7,7 +7,7 @@ Designed for power users who need to switch between simple string prompts and co
 ## Installation
 
 ```bash
-npm install openai zod cache-manager p-queue
+npm install openai zod cache-manager p-queue ajv
 ```
 
 ## Quick Start (Factory)
@@ -122,7 +122,7 @@ This is a high-level wrapper that employs a **Re-asking Loop**. If the LLM outpu
 **Return Type:** `Promise<T>`
 
 ### Level 1: Raw JSON Schema (`promptJson`)
-Use this if you have a standard JSON Schema object (e.g. from another library or API) and don't want to use Zod.
+Use this if you have a standard JSON Schema object (e.g. from another library or API) and don't want to use Zod. It uses **AJV** internally to validate the response against the schema.
 
 ```typescript
 const MySchema = {
@@ -137,8 +137,7 @@ const MySchema = {
 
 const result = await llm.promptJson(
     [{ role: "user", content: "I love this!" }],
-    MySchema,
-    (data) => data // Optional validator function
+    MySchema
 );
 ```
 
