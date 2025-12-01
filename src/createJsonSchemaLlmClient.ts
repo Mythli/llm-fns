@@ -210,10 +210,9 @@ ${schemaJsonString}`;
     async function promptJson<T>(
         messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         schema: Record<string, any>,
-        validator?: (data: any) => T,
         options?: JsonSchemaLlmClientOptions
     ): Promise<T> {
-        // Always validate against the schema using AJV first
+        // Always validate against the schema using AJV
         const ajvValidator = (data: any) => {
             const validate = ajv.compile(schema);
             const valid = validate(data);
@@ -221,19 +220,7 @@ ${schemaJsonString}`;
                 const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
                 throw new Error(`AJV Validation Error: ${errors}`);
             }
-            return data;
-        };
-
-        // Combine AJV validation with the custom validator (if provided)
-        const effectiveValidator = (data: any) => {
-            // 1. Run AJV validation
-            const ajvValidatedData = ajvValidator(data);
-            
-            // 2. Run custom validator if provided, otherwise return AJV result
-            if (validator) {
-                return validator(ajvValidatedData);
-            }
-            return ajvValidatedData as T;
+            return data as T;
         };
 
         const { finalMessages, schemaJsonString, response_format } = _getJsonPromptConfig(
@@ -260,7 +247,7 @@ The response provided was not valid JSON. Please correct it.`;
             }
 
             try {
-                const validatedData = await _validateOrFix(jsonData, effectiveValidator, schemaJsonString, options);
+                const validatedData = await _validateOrFix(jsonData, ajvValidator, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
                 // We assume the validator throws an error with a meaningful message

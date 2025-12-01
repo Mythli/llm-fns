@@ -113,19 +113,12 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
             unrepresentable: 'any'
         }) as Record<string, any>;
 
-        const validator = (data: any) => {
-            try {
-                return dataExtractionSchema.parse(data);
-            } catch (error) {
-                if (error instanceof ZodError) {
-                    // Format the error nicely for the LLM
-                    throw new Error(JSON.stringify(error.format(), null, 2));
-                }
-                throw error;
-            }
-        };
-
-        return jsonSchemaClient.promptJson(messages, schema, validator, options);
+        const result = await jsonSchemaClient.promptJson(messages, schema, options);
+        
+        // We still parse with Zod to ensure the types are correct and to apply any transformations/refinements
+        // that JSON Schema might not capture perfectly, or just to get the typed return.
+        // Note: If this fails, it won't trigger a retry in promptJson anymore, because promptJson only retries on AJV errors.
+        return dataExtractionSchema.parse(result);
     }
 
     async function isPromptZodCached<T extends ZodTypeAny>(

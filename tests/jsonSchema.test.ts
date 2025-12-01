@@ -42,8 +42,7 @@ describe('JSON Schema Structured Output Integration', () => {
 
         const result = await llm.promptJson(
             [{ role: 'user', content: `Analyze sentiment: ${text}` }],
-            schema,
-            (data) => data // Simple identity validator
+            schema
         );
 
         expect(result).toBeDefined();
@@ -73,8 +72,7 @@ describe('JSON Schema Structured Output Integration', () => {
 
             const result = await client.promptJson(
                 [{ role: 'user', content: "test" }],
-                schema,
-                (data) => data
+                schema
             );
             
             expect(result.age).toBe(20);
@@ -98,11 +96,7 @@ describe('JSON Schema Structured Output Integration', () => {
 
             const result = await client.promptJson(
                 [{ role: 'user', content: "test" }],
-                schema,
-                (data) => {
-                    if (typeof data.age !== 'number') throw new Error("Age must be a number");
-                    return data;
-                }
+                schema
             );
             
             expect(result.age).toBe(20);
@@ -110,32 +104,6 @@ describe('JSON Schema Structured Output Integration', () => {
             
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
             expect(secondCallArgs.messages[1].content).toContain('Schema Validation Error');
-        });
-
-        it('should use internal AJV validator when validator is undefined', async () => {
-            const mockPrompt = createMockPrompt([
-                '{"age": "twenty"}', // Invalid type (string)
-                '{"age": 20}'        // Valid
-            ]);
-            
-            const client = createJsonSchemaLlmClient({
-                prompt: mockPrompt,
-                isPromptCached: async () => false,
-            });
-
-            // Pass undefined as validator
-            const result = await client.promptJson(
-                [{ role: 'user', content: "test" }],
-                schema,
-                undefined as any
-            );
-
-            expect(result.age).toBe(20);
-            expect(mockPrompt).toHaveBeenCalledTimes(2);
-            
-            // Verify that the error message came from AJV
-            const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
-            expect(secondCallArgs.messages[1].content).toContain('AJV Validation Error');
         });
     });
 });
