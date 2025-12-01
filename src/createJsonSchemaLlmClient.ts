@@ -213,16 +213,28 @@ ${schemaJsonString}`;
         validator?: (data: any) => T,
         options?: JsonSchemaLlmClientOptions
     ): Promise<T> {
-        // If no validator is provided, use AJV to validate against the schema
-        const effectiveValidator = validator || ((data: any) => {
+        // Always validate against the schema using AJV first
+        const ajvValidator = (data: any) => {
             const validate = ajv.compile(schema);
             const valid = validate(data);
             if (!valid) {
                 const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
                 throw new Error(`AJV Validation Error: ${errors}`);
             }
-            return data as T;
-        });
+            return data;
+        };
+
+        // Combine AJV validation with the custom validator (if provided)
+        const effectiveValidator = (data: any) => {
+            // 1. Run AJV validation
+            const ajvValidatedData = ajvValidator(data);
+            
+            // 2. Run custom validator if provided, otherwise return AJV result
+            if (validator) {
+                return validator(ajvValidatedData);
+            }
+            return ajvValidatedData as T;
+        };
 
         const { finalMessages, schemaJsonString, response_format } = _getJsonPromptConfig(
             messages,
