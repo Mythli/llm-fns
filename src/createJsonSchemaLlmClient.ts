@@ -300,3 +300,4 @@ The response was valid JSON but did not conform to the required schema. Please r
 }
 
 export type JsonSchemaClient = ReturnType<typeof createJsonSchemaLlmClient>;
+export type PromptJsonFunction = JsonSchemaClient['promptJson'];

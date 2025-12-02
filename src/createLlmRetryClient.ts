@@ -242,3 +242,5 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     return { promptRetry, promptTextRetry, promptImageRetry };
 }
+
+export type LlmRetryClient = ReturnType<typeof createLlmRetryClient>;

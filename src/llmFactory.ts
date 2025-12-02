@@ -30,3 +30,5 @@ export function createLlm(params: CreateLlmFactoryParams) {
         ...zodClient
     };
 }
+
+export type LlmClient = ReturnType<typeof createLlm>;

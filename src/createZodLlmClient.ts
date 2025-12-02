@@ -158,3 +158,6 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
 
     return { promptZod, isPromptZodCached };
 }
+
+export type ZodLlmClient = ReturnType<typeof createZodLlmClient>;
+export type PromptZodFunction = ZodLlmClient['promptZod'];
