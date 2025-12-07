@@ -7,8 +7,8 @@ import { env } from './env.js';
 
 export async function createTestLlm() {
     const openai = new OpenAI({
-        apiKey: env.OPENAI_API_KEY,
-        baseURL: env.OPENAI_BASE_URL,
+        apiKey: env.TEST_API_KEY,
+        baseURL: env.TEST_BASE_URL,
     });
 
     // Create a SQLite cache for testing
