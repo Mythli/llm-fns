@@ -121,8 +121,8 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
             ...options,
             validator: zodValidator
         });
-        
-        return result;
+
+        return result as z.infer<T>;
     }
 
     async function isPromptZodCached<T extends ZodTypeAny>(
