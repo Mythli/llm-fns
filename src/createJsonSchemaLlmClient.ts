@@ -18,6 +18,13 @@ export type JsonSchemaLlmClientOptions = Omit<LlmPromptOptions, 'messages' | 're
      * @returns The processed data to be validated.
      */
     beforeValidation?: (data: any) => any;
+    /**
+     * A custom validator function.
+     * If provided, this function will be used to validate the parsed JSON data.
+     * It should throw an error if the data is invalid, or return the validated data (potentially transformed).
+     * If not provided, an AJV-based validator will be used.
+     */
+    validator?: (data: any) => any;
 }
 
 export interface CreateJsonSchemaLlmClientParams {
@@ -212,8 +219,8 @@ ${schemaJsonString}`;
         schema: Record<string, any>,
         options?: JsonSchemaLlmClientOptions
     ): Promise<T> {
-        // Always validate against the schema using AJV
-        const ajvValidator = (data: any) => {
+        // Default validator using AJV
+        const defaultValidator = (data: any) => {
             try {
                 const validate = ajv.compile(schema);
                 const valid = validate(data);
@@ -226,6 +233,8 @@ ${schemaJsonString}`;
                 throw error;
             }
         };
+
+        const validator = options?.validator ?? defaultValidator;
 
         const { finalMessages, schemaJsonString, response_format } = _getJsonPromptConfig(
             messages,
@@ -251,7 +260,7 @@ The response provided was not valid JSON. Please correct it.`;
             }
 
             try {
-                const validatedData = await _validateOrFix(jsonData, ajvValidator, schemaJsonString, options);
+                const validatedData = await _validateOrFix(jsonData, validator, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
                 // We assume the validator throws an error with a meaningful message
@@ -291,7 +300,7 @@ The response was valid JSON but did not conform to the required schema. Please r
             options
         );
 
-        const { maxRetries, useResponseFormat: _u, beforeValidation, ...restOptions } = options || {};
+        const { maxRetries, useResponseFormat: _u, beforeValidation, validator, ...restOptions } = options || {};
 
         return isPromptCached({
             messages: finalMessages,
