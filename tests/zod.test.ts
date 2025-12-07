@@ -61,6 +61,34 @@ describe('Zod Structured Output Integration', () => {
         expect(banana?.color).toBe('yellow');
     });
 
+    it('should extract complex nested data from a description (Live)', async () => {
+        const { llm } = await createTestLlm();
+
+        const UserProfileSchema = z.object({
+            username: z.string(),
+            skills: z.array(z.string()),
+            location: z.object({
+                city: z.string(),
+                country: z.string(),
+            }),
+            isAvailable: z.boolean(),
+        });
+
+        const text = "User 'dev_master' lives in Berlin, Germany. They are an expert in TypeScript, Rust, and Python. Currently, they are looking for work.";
+
+        const result = await llm.promptZod(
+            "Extract user profile information.",
+            text,
+            UserProfileSchema
+        );
+
+        expect(result.username).toBe('dev_master');
+        expect(result.skills).toEqual(expect.arrayContaining(['TypeScript', 'Rust', 'Python']));
+        expect(result.location.city).toBe('Berlin');
+        expect(result.location.country).toBe('Germany');
+        expect(result.isAvailable).toBe(true);
+    });
+
     describe('Retry Mechanisms (Mocked)', () => {
         const Schema = z.object({
             age: z.number()
