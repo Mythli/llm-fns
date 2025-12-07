@@ -214,13 +214,17 @@ ${schemaJsonString}`;
     ): Promise<T> {
         // Always validate against the schema using AJV
         const ajvValidator = (data: any) => {
-            const validate = ajv.compile(schema);
-            const valid = validate(data);
-            if (!valid) {
-                const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
-                throw new Error(`AJV Validation Error: ${errors}`);
+            try {
+                const validate = ajv.compile(schema);
+                const valid = validate(data);
+                if (!valid) {
+                    const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
+                    throw new Error(`AJV Validation Error: ${errors}`);
+                }
+                return data as T;
+            } catch(error: any) {
+                throw error;
             }
-            return data as T;
         };
 
         const { finalMessages, schemaJsonString, response_format } = _getJsonPromptConfig(
