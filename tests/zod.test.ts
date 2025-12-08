@@ -102,7 +102,6 @@ describe('Zod Structured Output Integration', () => {
 
             const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
             });
 
             const client = createZodLlmClient({
@@ -130,7 +129,6 @@ describe('Zod Structured Output Integration', () => {
 
             const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
             });
 
             const client = createZodLlmClient({
@@ -154,7 +152,6 @@ describe('Zod Structured Output Integration', () => {
 
             const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
                 disableJsonFixer: true // Force main loop
             });
 
@@ -188,7 +185,6 @@ describe('Zod Structured Output Integration', () => {
             const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockMainPrompt,
                 fallbackPrompt: mockFallbackPrompt,
-                isPromptCached: async () => false,
                 disableJsonFixer: true // Force error to retry loop immediately
             });
 
@@ -212,7 +208,6 @@ describe('Zod Structured Output Integration', () => {
 
             const jsonSchemaClient = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
                 disableJsonFixer: true
             });
 

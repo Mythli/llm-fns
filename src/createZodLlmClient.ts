@@ -125,42 +125,7 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
         return result as z.infer<T>;
     }
 
-    async function isPromptZodCached<T extends ZodTypeAny>(
-        schema: T,
-        options?: ZodLlmClientOptions
-    ): Promise<boolean>;
-    async function isPromptZodCached<T extends ZodTypeAny>(
-        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        schema: T,
-        options?: ZodLlmClientOptions
-    ): Promise<boolean>;
-    async function isPromptZodCached<T extends ZodTypeAny>(
-        prompt: string,
-        schema: T,
-        options?: ZodLlmClientOptions
-    ): Promise<boolean>;
-    async function isPromptZodCached<T extends ZodTypeAny>(
-        mainInstruction: string,
-        userMessagePayload: string | OpenAI.Chat.Completions.ChatCompletionContentPart[],
-        dataExtractionSchema: T,
-        options?: ZodLlmClientOptions
-    ): Promise<boolean>;
-    async function isPromptZodCached<T extends ZodTypeAny>(
-        arg1: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[] | T,
-        arg2?: string | OpenAI.Chat.Completions.ChatCompletionContentPart[] | T | ZodLlmClientOptions,
-        arg3?: T | ZodLlmClientOptions,
-        arg4?: ZodLlmClientOptions
-    ): Promise<boolean> {
-        const { messages, dataExtractionSchema, options } = normalizeZodArgs(arg1, arg2, arg3, arg4);
-
-        const schema = z.toJSONSchema(dataExtractionSchema, {
-            unrepresentable: 'any'
-        }) as Record<string, any>;
-
-        return jsonSchemaClient.isPromptJsonCached(messages, schema, options);
-    }
-
-    return { promptZod, isPromptZodCached };
+    return { promptZod };
 }
 
 export type ZodLlmClient = ReturnType<typeof createZodLlmClient>;

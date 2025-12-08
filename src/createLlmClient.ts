@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import OpenAI from "openai";
-import type { Cache } from 'cache-manager'; // Using Cache from cache-manager
 import type PQueue from 'p-queue';
 import { executeWithRetry } from './retryUtils.js';
 
@@ -195,7 +194,6 @@ export type OpenRouterResponseFormat =
 export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'model' | 'response_format' | 'modalities' | 'messages'> {
     messages: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[];
     model?: ModelConfig;    // Allow overriding the default model for a specific call
-    ttl?: number;      // Cache TTL in *MILLISECONDS* for this specific call, used if cache is enabled
     retries?: number;  // Number of retries for the API call.
     /** @deprecated Use `reasoning` object instead. */
     response_format?: OpenRouterResponseFormat;
@@ -211,7 +209,6 @@ export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompl
  */
 export interface CreateLlmClientParams {
     openai: OpenAI;
-    cache?: Cache; // Cache instance is now optional. Expect a cache-manager compatible instance if provided.
     defaultModel: ModelConfig; // The default OpenAI model to use if not overridden in LlmPromptOptions
     maxConversationChars?: number;
     queue?: PQueue;
@@ -235,15 +232,15 @@ export function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<Ll
 }
 
 /**
- * Factory function that creates a GPT "prompt" function, with optional caching.
- * @param params - The core dependencies (API key, base URL, default model, and optional cache instance).
- * @returns An async function `prompt` ready to make OpenAI calls, with caching if configured.
+ * Factory function that creates a GPT "prompt" function.
+ * @param params - The core dependencies (API key, base URL, default model).
+ * @returns An async function `prompt` ready to make OpenAI calls.
  */
 export function createLlmClient(params: CreateLlmClientParams) {
-    const { openai, cache: cacheInstance, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
+    const { openai, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
 
-    const getCompletionParamsAndCacheKey = (options: LlmPromptOptions) => {
-        const { ttl, model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
+    const getCompletionParams = (options: LlmPromptOptions) => {
+        const { model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
 
         // Ensure messages is an array (it should be if normalized, but for safety/types)
         const messagesArray = typeof messages === 'string' 
@@ -275,35 +272,18 @@ export function createLlmClient(params: CreateLlmClientParams) {
             ...restApiOptions,
         };
 
-        let cacheKey: string | undefined;
-        if (cacheInstance) {
-            const cacheKeyString = JSON.stringify(completionParams);
-            cacheKey = `gptask:${crypto.createHash('md5').update(cacheKeyString).digest('hex')}`;
-        }
-
-        return { completionParams, cacheKey, ttl, modelToUse, finalMessages, retries };
+        return { completionParams, modelToUse, finalMessages, retries };
     };
 
     async function prompt(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion>;
     async function prompt(options: LlmPromptOptions): Promise<OpenAI.Chat.Completions.ChatCompletion>;
     async function prompt(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion> {
         const options = normalizeOptions(arg1, arg2);
-        const { completionParams, cacheKey, ttl, modelToUse, finalMessages, retries } = getCompletionParamsAndCacheKey(options);
-
-        if (cacheInstance && cacheKey) {
-            try {
-                const cachedResponse = await cacheInstance.get<string>(cacheKey);
-                if (cachedResponse !== undefined && cachedResponse !== null) {
-                    return JSON.parse(cachedResponse);
-                }
-            } catch (error) {
-                console.warn("Cache get error:", error);
-            }
-        }
+        const { completionParams, finalMessages, retries } = getCompletionParams(options);
 
         const promptSummary = getPromptSummary(finalMessages);
 
-        const apiCallAndCache = async (): Promise<OpenAI.Chat.Completions.ChatCompletion> => {
+        const apiCall = async (): Promise<OpenAI.Chat.Completions.ChatCompletion> => {
             const task = () => executeWithRetry<OpenAI.Chat.Completions.ChatCompletion, OpenAI.Chat.Completions.ChatCompletion>(
                 async () => {
                     return openai.chat.completions.create(completionParams as any);
@@ -323,35 +303,10 @@ export function createLlmClient(params: CreateLlmClientParams) {
             );
 
             const response = (await (queue ? queue.add(task, { id: promptSummary, messages: finalMessages } as any) : task())) as OpenAI.Chat.Completions.ChatCompletion;
-
-            if (cacheInstance && response && cacheKey) {
-                try {
-                    await cacheInstance.set(cacheKey, JSON.stringify(response), ttl);
-                } catch (error) {
-                    console.warn("Cache set error:", error);
-                }
-            }
             return response;
         };
 
-        return apiCallAndCache();
-    }
-
-    async function isPromptCached(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<boolean>;
-    async function isPromptCached(options: LlmPromptOptions): Promise<boolean>;
-    async function isPromptCached(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<boolean> {
-        const options = normalizeOptions(arg1, arg2);
-        const { cacheKey } = getCompletionParamsAndCacheKey(options);
-        if (!cacheInstance || !cacheKey) {
-            return false;
-        }
-        try {
-            const cachedResponse = await cacheInstance.get<string>(cacheKey);
-            return cachedResponse !== undefined && cachedResponse !== null;
-        } catch (error) {
-            console.warn("Cache get error:", error);
-            return false;
-        }
+        return apiCall();
     }
 
     async function promptText(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<string>;
@@ -389,10 +344,9 @@ export function createLlmClient(params: CreateLlmClientParams) {
         throw new Error("LLM returned no image content.");
     }
 
-    return { prompt, isPromptCached, promptText, promptImage };
+    return { prompt, promptText, promptImage };
 }
 
 export type PromptFunction = ReturnType<typeof createLlmClient>['prompt'];
-export type IsPromptCachedFunction = ReturnType<typeof createLlmClient>['isPromptCached'];
 export type PromptTextFunction = ReturnType<typeof createLlmClient>['promptText'];
 export type PromptImageFunction = ReturnType<typeof createLlmClient>['promptImage'];

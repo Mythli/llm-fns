@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import Ajv from 'ajv';
-import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat, IsPromptCachedFunction } from "./createLlmClient.js";
+import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat } from "./createLlmClient.js";
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 
 export type JsonSchemaLlmClientOptions = Omit<LlmPromptOptions, 'messages' | 'response_format'> & {
@@ -29,13 +29,12 @@ export type JsonSchemaLlmClientOptions = Omit<LlmPromptOptions, 'messages' | 're
 
 export interface CreateJsonSchemaLlmClientParams {
     prompt: PromptFunction;
-    isPromptCached: IsPromptCachedFunction;
     fallbackPrompt?: PromptFunction;
     disableJsonFixer?: boolean;
 }
 
 export function createJsonSchemaLlmClient(params: CreateJsonSchemaLlmClientParams) {
-    const { prompt, isPromptCached, fallbackPrompt, disableJsonFixer = false } = params;
+    const { prompt, fallbackPrompt, disableJsonFixer = false } = params;
     const llmRetryClient = createLlmRetryClient({ prompt, fallbackPrompt });
     const ajv = new Ajv({ strict: false }); // Initialize AJV
 
@@ -289,27 +288,7 @@ The response was valid JSON but did not conform to the required schema. Please r
         return llmRetryClient.promptTextRetry(retryOptions);
     }
 
-    async function isPromptJsonCached(
-        messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        schema: Record<string, any>,
-        options?: JsonSchemaLlmClientOptions
-    ): Promise<boolean> {
-        const { finalMessages, response_format } = _getJsonPromptConfig(
-            messages,
-            schema,
-            options
-        );
-
-        const { maxRetries, useResponseFormat: _u, beforeValidation, validator, ...restOptions } = options || {};
-
-        return isPromptCached({
-            messages: finalMessages,
-            response_format,
-            ...restOptions
-        });
-    }
-
-    return { promptJson, isPromptJsonCached };
+    return { promptJson };
 }
 
 export type JsonSchemaClient = ReturnType<typeof createJsonSchemaLlmClient>;

@@ -1,6 +1,4 @@
 import OpenAI from 'openai';
-import { createCache } from 'cache-manager';
-import KeyvSqlite from '@keyv/sqlite';
 import PQueue from 'p-queue';
 import { createLlm } from '../src/llmFactory.js';
 import { env } from './env.js';
@@ -10,10 +8,6 @@ export async function createTestLlm() {
         apiKey: env.TEST_API_KEY,
         baseURL: env.TEST_BASE_URL,
     });
-
-    // Create a SQLite cache for testing
-    const sqliteStore = new KeyvSqlite('sqlite://test-cache.sqlite');
-    const cache = createCache({ stores: [sqliteStore as any] });
 
     const queue = new PQueue({ concurrency: 4 });
 
@@ -35,10 +29,9 @@ export async function createTestLlm() {
 
     const llm = createLlm({
         openai,
-        cache,
         defaultModel: env.TEST_MODEL,
         queue,
     });
 
-    return { llm, cache, queue };
+    return { llm, queue };
 }

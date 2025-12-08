@@ -15,8 +15,7 @@ export function createLlm(params: CreateLlmFactoryParams) {
     });
 
     const jsonSchemaClient = createJsonSchemaLlmClient({
-        prompt: baseClient.prompt,
-        isPromptCached: baseClient.isPromptCached
+        prompt: baseClient.prompt
     });
 
     const zodClient = createZodLlmClient({

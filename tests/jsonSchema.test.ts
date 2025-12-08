@@ -67,7 +67,6 @@ describe('JSON Schema Structured Output Integration', () => {
 
             const client = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
             });
 
             const result = await client.promptJson(
@@ -91,7 +90,6 @@ describe('JSON Schema Structured Output Integration', () => {
 
             const client = createJsonSchemaLlmClient({
                 prompt: mockPrompt,
-                isPromptCached: async () => false,
             });
 
             const result = await client.promptJson(
