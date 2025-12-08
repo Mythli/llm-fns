@@ -8,7 +8,7 @@ import { env } from './env.js';
 import { createCachedFetcher } from '../src/createCachedFetcher.js';
 
 export async function createTestLlm() {
-    const sqliteStore = new KeyvSqlite('sqlite://:memory:');
+    const sqliteStore = new KeyvSqlite('sqlite://test-cache.sqlite');
     const cache = createCache({
         stores: [new Keyv({ store: sqliteStore })],
         ttl: 60 * 1000,
