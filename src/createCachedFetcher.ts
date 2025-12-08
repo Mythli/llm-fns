@@ -83,7 +83,11 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
         };
 
         if (!timeout) {
-            return fetchImpl(url, finalOptions);
+            try {
+                return await fetchImpl(url, finalOptions);
+            } catch(error: any) {
+                throw error;
+            }
         }
 
         const controller = new AbortController();
@@ -144,7 +148,7 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
                     bodyStr = 'unserializable';
                 }
             }
-            
+
             const hash = crypto.createHash('md5').update(bodyStr).digest('hex');
             cacheKey += `:${hash}`;
         }
