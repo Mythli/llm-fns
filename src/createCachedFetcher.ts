@@ -74,12 +74,16 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
     const fetchImpl = customFetch ?? fetch;
 
     const fetchWithTimeout = async (url: string | URL | Request, options?: RequestInit): Promise<Response> => {
+        // Correctly merge headers using Headers API to handle various input formats (plain object, Headers instance, array)
+        // and avoid issues with spreading Headers objects which can lead to lost headers or Symbol errors.
+        const headers = new Headers(options?.headers);
+        if (userAgent) {
+            headers.set('User-Agent', userAgent);
+        }
+
         const finalOptions: RequestInit = {
             ...options,
-            headers: {
-                ...options?.headers,
-                ...(userAgent ? { 'User-Agent': userAgent } : {}),
-            },
+            headers,
         };
 
         if (!timeout) {
