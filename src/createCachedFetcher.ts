@@ -2,7 +2,6 @@
 // src/lib/createCachedFetcher.ts
 
 import type { Cache } from 'cache-manager';
-import type { Dispatcher } from 'undici';
 import crypto from 'crypto';
 
 // Define a custom options type that extends RequestInit with our custom `ttl` property.
@@ -22,16 +21,16 @@ export type Fetcher = (
 export interface CreateFetcherDependencies {
     /** The cache instance (e.g., from cache-manager). */
     cache?: Cache;
-    /** A prefix for all cache keys to avoid collisions. */
-    prefix: string;
+    /** A prefix for all cache keys to avoid collisions. Defaults to 'http-cache'. */
+    prefix?: string;
     /** Time-to-live for cache entries, in milliseconds. */
     ttl?: number;
-    /** Request timeout in milliseconds. */
-    timeout: number;
+    /** Request timeout in milliseconds. If not provided, no timeout is applied. */
+    timeout?: number;
     /** User-Agent string for requests. */
     userAgent?: string;
-    /** Optional proxy agent (undici Dispatcher) for requests. */
-    proxyAgent?: Dispatcher;
+    /** Optional custom fetch implementation. Defaults to global fetch. */
+    fetch?: (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
 }
 
 // The data we store in the cache. Kept internal to this module.
@@ -65,9 +64,23 @@ export class CachedResponse extends Response {
  * @returns A function with the same signature as native `fetch`.
  */
 export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
-    const { cache, prefix, ttl, timeout, userAgent, proxyAgent } = deps;
+    const { cache, prefix = 'http-cache', ttl, timeout, userAgent, fetch: customFetch } = deps;
+
+    const fetchImpl = customFetch ?? fetch;
 
     const fetchWithTimeout = async (url: string | URL | Request, options?: RequestInit): Promise<Response> => {
+        const finalOptions: RequestInit = {
+            ...options,
+            headers: {
+                ...options?.headers,
+                ...(userAgent ? { 'User-Agent': userAgent } : {}),
+            },
+        };
+
+        if (!timeout) {
+            return fetchImpl(url, finalOptions);
+        }
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
             const urlString = typeof url === 'string' ? url : url.toString();
@@ -75,22 +88,10 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
             controller.abort();
         }, timeout);
 
-        const finalOptions: RequestInit = {
-            ...options,
-            headers: {
-                ...options?.headers,
-                ...(userAgent ? { 'User-Agent': userAgent } : {}),
-            },
-            signal: controller.signal,
-        };
-
-        if (proxyAgent) {
-            // @ts-ignore
-            finalOptions.dispatcher = proxyAgent;
-        }
+        finalOptions.signal = controller.signal;
 
         try {
-            const response = await fetch(url, finalOptions);
+            const response = await fetchImpl(url, finalOptions);
             return response;
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') {
