@@ -1,12 +1,25 @@
 import OpenAI from 'openai';
 import PQueue from 'p-queue';
+import { caching } from 'cache-manager';
 import { createLlm } from '../src/llmFactory.js';
 import { env } from './env.js';
+import { createCachedFetcher } from '../src/createCachedFetcher.js';
 
 export async function createTestLlm() {
+    const memoryCache = await caching('memory', {
+        max: 100,
+        ttl: 60 * 1000,
+    });
+
+    const fetcher = createCachedFetcher({
+        cache: memoryCache,
+        ttl: 60 * 1000,
+    });
+
     const openai = new OpenAI({
         apiKey: env.TEST_API_KEY,
         baseURL: env.TEST_BASE_URL,
+        fetch: fetcher,
     });
 
     const queue = new PQueue({ concurrency: 4 });
