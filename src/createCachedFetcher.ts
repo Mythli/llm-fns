@@ -1,8 +1,8 @@
 // 
 // src/lib/createCachedFetcher.ts
 
-import { Cache } from 'cache-manager';
-import { ProxyAgent } from 'undici';
+import type { Cache } from 'cache-manager';
+import type { Dispatcher } from 'undici';
 import crypto from 'crypto';
 
 // Define a custom options type that extends RequestInit with our custom `ttl` property.
@@ -30,7 +30,8 @@ export interface CreateFetcherDependencies {
     timeout: number;
     /** User-Agent string for requests. */
     userAgent?: string;
-    proxyUrl?: string;
+    /** Optional proxy agent (undici Dispatcher) for requests. */
+    proxyAgent?: Dispatcher;
 }
 
 // The data we store in the cache. Kept internal to this module.
@@ -64,7 +65,7 @@ export class CachedResponse extends Response {
  * @returns A function with the same signature as native `fetch`.
  */
 export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
-    const { cache, prefix, ttl, timeout, userAgent, proxyUrl } = deps;
+    const { cache, prefix, ttl, timeout, userAgent, proxyAgent } = deps;
 
     const fetchWithTimeout = async (url: string | URL | Request, options?: RequestInit): Promise<Response> => {
         const controller = new AbortController();
@@ -83,9 +84,9 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
             signal: controller.signal,
         };
 
-        if (proxyUrl) {
+        if (proxyAgent) {
             // @ts-ignore
-            finalOptions.dispatcher = new ProxyAgent(proxyUrl);
+            finalOptions.dispatcher = proxyAgent;
         }
 
         try {
