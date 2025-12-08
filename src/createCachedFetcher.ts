@@ -1,8 +1,13 @@
-// 
-// src/lib/createCachedFetcher.ts
+// src/createCachedFetcher.ts
 
-import type { Cache } from 'cache-manager';
 import crypto from 'crypto';
+
+// Define a minimal interface for the cache to avoid tight coupling with cache-manager versions
+// and to support the new v7 API which might not export 'Cache' in the same way.
+export interface CacheLike {
+    get<T>(key: string): Promise<T | undefined | null>;
+    set(key: string, value: any, ttl?: number): Promise<any>;
+}
 
 // Define a custom options type that extends RequestInit with our custom `ttl` property.
 export type FetcherOptions = RequestInit & {
@@ -20,7 +25,7 @@ export type Fetcher = (
 // Define the dependencies needed to create our cached fetcher.
 export interface CreateFetcherDependencies {
     /** The cache instance (e.g., from cache-manager). */
-    cache?: Cache;
+    cache?: CacheLike;
     /** A prefix for all cache keys to avoid collisions. Defaults to 'http-cache'. */
     prefix?: string;
     /** Time-to-live for cache entries, in milliseconds. */

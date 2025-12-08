@@ -1,18 +1,21 @@
 import OpenAI from 'openai';
 import PQueue from 'p-queue';
-import { caching } from 'cache-manager';
+import { createCache } from 'cache-manager';
+import { Keyv } from 'keyv';
+import KeyvSqlite from '@keyv/sqlite';
 import { createLlm } from '../src/llmFactory.js';
 import { env } from './env.js';
 import { createCachedFetcher } from '../src/createCachedFetcher.js';
 
 export async function createTestLlm() {
-    const memoryCache = await caching('memory', {
-        max: 100,
+    const sqliteStore = new KeyvSqlite('sqlite://:memory:');
+    const cache = createCache({
+        stores: [new Keyv({ store: sqliteStore })],
         ttl: 60 * 1000,
     });
 
     const fetcher = createCachedFetcher({
-        cache: memoryCache,
+        cache: cache,
         ttl: 60 * 1000,
     });
 
