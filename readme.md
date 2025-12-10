@@ -32,6 +32,135 @@ const llm = createLlm({
 
 ---
 
+## Model Presets (Temperature & Thinking Level)
+
+The `defaultModel` parameter accepts either a simple string or a **configuration object** that bundles the model name with default parameters like `temperature` or `reasoning_effort`.
+
+### Setting a Default Temperature
+
+```typescript
+// Create a "creative" client with high temperature
+const creativeWriter = createLlm({
+    openai,
+    defaultModel: {
+        model: 'gpt-4o',
+        temperature: 1.2,
+        frequency_penalty: 0.5
+    }
+});
+
+// All calls will use these defaults
+await creativeWriter.promptText("Write a poem about the ocean");
+
+// Override for a specific call
+await creativeWriter.promptText("Summarize this document", {
+    model: { temperature: 0.2 }  // Override just temperature, keeps model
+});
+```
+
+### Configuring Thinking/Reasoning Models
+
+For models that support extended thinking (like `o1`, `o3`, or Claude with thinking), use `reasoning_effort` or model-specific parameters:
+
+```typescript
+// Create a "deep thinker" client for complex reasoning tasks
+const reasoner = createLlm({
+    openai,
+    defaultModel: {
+        model: 'o3',
+        reasoning_effort: 'high'  // 'low' | 'medium' | 'high'
+    }
+});
+
+// All calls will use extended thinking
+const analysis = await reasoner.promptText("Analyze this complex problem...");
+
+// Create a fast reasoning client for simpler tasks
+const quickReasoner = createLlm({
+    openai,
+    defaultModel: {
+        model: 'o3-mini',
+        reasoning_effort: 'low'
+    }
+});
+```
+
+### Multiple Preset Clients
+
+A common pattern is to create multiple clients with different presets:
+
+```typescript
+// Deterministic client for structured data extraction
+const extractorLlm = createLlm({
+    openai,
+    defaultModel: {
+        model: 'gpt-4o-mini',
+        temperature: 0
+    }
+});
+
+// Creative client for content generation
+const writerLlm = createLlm({
+    openai,
+    defaultModel: {
+        model: 'gpt-4o',
+        temperature: 1.0,
+        top_p: 0.95
+    }
+});
+
+// Reasoning client for complex analysis
+const analyzerLlm = createLlm({
+    openai,
+    defaultModel: {
+        model: 'o3',
+        reasoning_effort: 'medium'
+    }
+});
+
+// Use the appropriate client for each task
+const data = await extractorLlm.promptZod(DataSchema);
+const story = await writerLlm.promptText("Write a short story");
+const solution = await analyzerLlm.promptText("Solve this logic puzzle...");
+```
+
+### Per-Call Overrides
+
+Any preset can be overridden on individual calls:
+
+```typescript
+const llm = createLlm({
+    openai,
+    defaultModel: {
+        model: 'gpt-4o',
+        temperature: 0.7
+    }
+});
+
+// Use defaults
+await llm.promptText("Hello");
+
+// Override model entirely
+await llm.promptText("Complex task", {
+    model: {
+        model: 'o3',
+        reasoning_effort: 'high'
+    }
+});
+
+// Override just temperature (keeps default model)
+await llm.promptText("Be more creative", {
+    temperature: 1.5
+});
+
+// Or use short form to switch models
+await llm.promptText("Quick task", {
+    model: 'gpt-4o-mini'
+});
+```
+
+---
+
 # Use Case 1: Text & Chat (`llm.prompt` / `llm.promptText`)
 
 ### Level 1: The Easy Way (String Output)
