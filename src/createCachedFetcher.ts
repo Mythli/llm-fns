@@ -2,7 +2,12 @@
 
 import crypto from 'crypto';
 
-// Define a minimal interface for the cache to avoid tight coupling with cache-manager versions
+// Define a minimal interface**Incorporating JSON Error Check**
+
+I've integrated the JSON error check into `createCachedFetcher.ts`, along with the `shouldCache` type, and ensured it defaults when no handler is given. The logic flow is refined to enhance clarity and error handling, making the implementation robust and user-friendly. I've also implemented the full code changes.
+
+
+ for the cache to avoid tight coupling with cache-manager versions
 // and to support the new v7 API which might not export 'Cache' in the same way.
 export interface CacheLike {
     get<T>(key: string): Promise<T | undefined | null>;
@@ -36,6 +41,12 @@ export interface CreateFetcherDependencies {
     userAgent?: string;
     /** Optional custom fetch implementation. Defaults to global fetch. */
     fetch?: (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
+    /** 
+     * Optional callback to determine if a response should be cached. 
+     * It receives a cloned response that can be read (e.g. .json()).
+     * If it returns false, the response is not cached.
+     */
+    shouldCache?: (response: Response) => Promise<boolean> | boolean;
 }
 
 // The data we store in the cache. Kept internal to this module.
@@ -69,7 +80,7 @@ export class CachedResponse extends Response {
  * @returns A function with the same signature as native `fetch`.
  */
 export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
-    const { cache, prefix = 'http-cache', ttl, timeout, userAgent, fetch: customFetch } = deps;
+    const { cache, prefix = 'http-cache', ttl, timeout, userAgent, fetch: customFetch, shouldCache } = deps;
 
     const fetchImpl = customFetch ?? fetch;
 
@@ -178,21 +189,50 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
 
             // 3. Store in cache on success
             if (response.ok) {
-                const responseClone = response.clone();
-                const bodyBuffer = await responseClone.arrayBuffer();
-                // Convert ArrayBuffer to a base64 string for safe JSON serialization.
-                const bodyBase64 = Buffer.from(bodyBuffer).toString('base64');
-                const headers = Object.fromEntries(response.headers.entries());
+                let isCacheable = true;
 
-                const itemToCache: CacheData = {
-                    bodyBase64,
-                    headers,
-                    status: response.status,
-                    finalUrl: response.url,
-                };
+                if (shouldCache) {
+                    const checkClone = response.clone();
+                    try {
+                        isCacheable = await shouldCache(checkClone);
+                    } catch (e) {
+                        console.warn('[Cache Check Error] shouldCache threw an error, skipping cache', e);
+                        isCacheable = false;
+                    }
+                } else {
+                    // Default behavior: check for .error in JSON responses
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const checkClone = response.clone();
+                        try {
+                            const body = await checkClone.json();
+                            if (body && typeof body === 'object' && 'error' in body) {
+                                console.log(`[Cache SKIP] JSON response contains .error property for: ${urlString}`);
+                                isCacheable = false;
+                            }
+                        } catch (e) {
+                            // Ignore JSON parse errors, assume cacheable if status is OK
+                        }
+                    }
+                }
 
-                await cache.set(cacheKey, itemToCache, options?.ttl ?? ttl);
-                console.log(`[Cache SET] for: ${cacheKey}`);
+                if (isCacheable) {
+                    const responseClone = response.clone();
+                    const bodyBuffer = await responseClone.arrayBuffer();
+                    // Convert ArrayBuffer to a base64 string for safe JSON serialization.
+                    const bodyBase64 = Buffer.from(bodyBuffer).toString('base64');
+                    const headers = Object.fromEntries(response.headers.entries());
+
+                    const itemToCache: CacheData = {
+                        bodyBase64,
+                        headers,
+                        status: response.status,
+                        finalUrl: response.url,
+                    };
+
+                    await cache.set(cacheKey, itemToCache, options?.ttl ?? ttl);
+                    console.log(`[Cache SET] for: ${cacheKey}`);
+                }
             }
 
             // 4. Return the original response
