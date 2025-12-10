@@ -151,7 +151,7 @@ function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessag
     const fullText = concatMessageText(messages);
     // Replace multiple whitespace chars with a single space and trim.
     const cleanedText = fullText.replace(/\s+/g, ' ').trim();
-    
+
     if (cleanedText.length <= 50) {
         return cleanedText;
     }
@@ -159,7 +159,7 @@ function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessag
     const partLength = 15;
     const start = cleanedText.substring(0, partLength);
     const end = cleanedText.substring(cleanedText.length - partLength);
-    
+
     const midIndex = Math.floor(cleanedText.length / 2);
     const midStart = Math.max(partLength, midIndex - Math.ceil(partLength / 2));
     const midEnd = Math.min(cleanedText.length - partLength, midStart + partLength);
@@ -243,7 +243,7 @@ export function createLlmClient(params: CreateLlmClientParams) {
         const { model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
 
         // Ensure messages is an array (it should be if normalized, but for safety/types)
-        const messagesArray = typeof messages === 'string' 
+        const messagesArray = typeof messages === 'string'
             ? [{ role: 'user', content: messages }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[]
             : messages;
 
@@ -289,6 +289,12 @@ export function createLlmClient(params: CreateLlmClientParams) {
                     return openai.chat.completions.create(completionParams as any);
                 },
                 async (completion) => {
+                    if((completion as any).error) {
+                        return {
+                            isValid: false,
+                        }
+                    }
+
                     return { isValid: true, data: completion };
                 },
                 retries ?? 3,
