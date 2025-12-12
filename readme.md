@@ -27,6 +27,7 @@ const llm = createLlm({
     // cache: Cache instance (cache-manager)
     // queue: PQueue instance for concurrency control
     // maxConversationChars: number (auto-truncation)
+    // defaultRequestOptions: { headers, timeout, signal }
 });
 ```
 
@@ -214,8 +215,14 @@ const res = await llm.prompt({
     
     // Library Extensions
     model: "gpt-4o",    // Override default model for this call
-    ttl: 5000,          // Cache this specific call for 5s (in ms)
     retries: 5,         // Retry network errors 5 times
+    
+    // Request-level options (headers, timeout, abort signal)
+    requestOptions: {
+        headers: { 'X-Cache-Salt': 'v2' },  // Affects cache key
+        timeout: 60000,
+        signal: abortController.signal
+    }
 });
 ```
 
@@ -299,7 +306,6 @@ const gameState = await llm.promptZod(
         model: "google/gemini-flash-1.5", 
         disableJsonFixer: true, // Turn off the automatic JSON repair agent
         maxRetries: 0,          // Fail immediately on error
-        ttl: 60000              // Cache result
     }
 );
 ```
