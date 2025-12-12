@@ -1,9 +1,17 @@
 import OpenAI from 'openai';
 import Ajv from 'ajv';
-import { PromptFunction, LlmPromptOptions, OpenRouterResponseFormat } from "./createLlmClient.js";
+import { 
+    PromptFunction, 
+    LlmCommonOptions, 
+    OpenRouterResponseFormat 
+} from "./createLlmClient.js";
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 
-export type JsonSchemaLlmClientOptions = Omit<LlmPromptOptions, 'messages' | 'response_format'> & {
+/**
+ * Options for JSON schema prompt functions.
+ * Extends common options with JSON-specific settings.
+ */
+export interface JsonSchemaLlmClientOptions extends LlmCommonOptions {
     maxRetries?: number;
     /**
      * If true, passes `response_format: { type: 'json_object' }` to the model.
@@ -36,7 +44,7 @@ export interface CreateJsonSchemaLlmClientParams {
 export function createJsonSchemaLlmClient(params: CreateJsonSchemaLlmClientParams) {
     const { prompt, fallbackPrompt, disableJsonFixer = false } = params;
     const llmRetryClient = createLlmRetryClient({ prompt, fallbackPrompt });
-    const ajv = new Ajv({ strict: false }); // Initialize AJV
+    const ajv = new Ajv({ strict: false });
 
     async function _tryToFixJson(
         brokenResponse: string,
@@ -73,7 +81,13 @@ ${brokenResponse}
             ? { type: 'json_object' }
             : undefined;
 
-        const { maxRetries, useResponseFormat: _useResponseFormat, ...restOptions } = options || {};
+        const { 
+            maxRetries, 
+            useResponseFormat: _useResponseFormat, 
+            beforeValidation,
+            validator,
+            ...restOptions 
+        } = options || {};
 
         const completion = await prompt({
             messages,
@@ -98,7 +112,6 @@ ${brokenResponse}
     ): Promise<any> {
         let jsonDataToParse: string = llmResponseString.trim();
 
-        // Robust handling for responses wrapped in markdown code blocks
         const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
         const match = codeBlockRegex.exec(jsonDataToParse);
         if (match && match[1]) {
@@ -113,10 +126,9 @@ ${brokenResponse}
             return JSON.parse(jsonDataToParse);
         } catch (parseError: any) {
             if (disableJsonFixer) {
-                throw parseError; // re-throw original error
+                throw parseError;
             }
 
-            // Attempt a one-time fix before failing.
             const errorDetails = `JSON Parse Error: ${parseError.message}`;
             const fixedResponse = await _tryToFixJson(jsonDataToParse, schemaJsonString, errorDetails, options);
 
@@ -124,12 +136,11 @@ ${brokenResponse}
                 try {
                     return JSON.parse(fixedResponse);
                 } catch (e) {
-                    // Fix-up failed, throw original error.
                     throw parseError;
                 }
             }
 
-            throw parseError; // if no fixed response
+            throw parseError;
         }
     }
 
@@ -149,7 +160,6 @@ ${brokenResponse}
                 throw validationError;
             }
 
-            // Attempt a one-time fix for schema validation errors.
             const errorDetails = `Schema Validation Error: ${validationError.message}`;
             const fixedResponse = await _tryToFixJson(JSON.stringify(jsonData, null, 2), schemaJsonString, errorDetails, options);
 
@@ -161,12 +171,11 @@ ${brokenResponse}
                     }
                     return validator(fixedJsonData);
                 } catch (e) {
-                    // Fix-up failed, throw original validation error
                     throw validationError;
                 }
             }
 
-            throw validationError; // if no fixed response
+            throw validationError;
         }
     }
 
@@ -184,21 +193,17 @@ Do NOT include any other text, explanations, or markdown formatting (like \`\`\`
 JSON schema:
 ${schemaJsonString}`;
 
-        // Clone messages to avoid mutating the input
         const finalMessages = [...messages];
 
-        // Find the first system message to append instructions to
         const systemMessageIndex = finalMessages.findIndex(m => m.role === 'system');
 
         if (systemMessageIndex !== -1) {
-            // Append to existing system message
             const existingContent = finalMessages[systemMessageIndex].content;
             finalMessages[systemMessageIndex] = {
                 ...finalMessages[systemMessageIndex],
                 content: `${existingContent}\n${commonPromptFooter}`
             };
         } else {
-            // Prepend new system message
             finalMessages.unshift({
                 role: 'system',
                 content: commonPromptFooter
@@ -218,7 +223,6 @@ ${schemaJsonString}`;
         schema: Record<string, any>,
         options?: JsonSchemaLlmClientOptions
     ): Promise<T> {
-        // Default validator using AJV
         const defaultValidator = (data: any) => {
             try {
                 const validate = ajv.compile(schema);
@@ -262,7 +266,6 @@ The response provided was not valid JSON. Please correct it.`;
                 const validatedData = await _validateOrFix(jsonData, validator, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
-                // We assume the validator throws an error with a meaningful message
                 const rawResponseForError = JSON.stringify(jsonData, null, 2);
                 const errorDetails = validationError.message;
                 const errorMessage = `Your previous response resulted in an error.
@@ -278,8 +281,17 @@ The response was valid JSON but did not conform to the required schema. Please r
             }
         };
 
-        const retryOptions: LlmRetryOptions<T> = {
-            ...options,
+        const { 
+            maxRetries, 
+            useResponseFormat: _useResponseFormat, 
+            beforeValidation,
+            validator: _validator,
+            ...restOptions 
+        } = options || {};
+
+        const retryOptions: LlmRetryOptions<T> & { messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] } = {
+            ...restOptions,
+            maxRetries,
             messages: finalMessages,
             response_format,
             validate: processResponse

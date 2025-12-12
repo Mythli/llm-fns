@@ -1,7 +1,12 @@
 import OpenAI from 'openai';
-import { PromptFunction, LlmPromptOptions, normalizeOptions } from "./createLlmClient.js";
+import { 
+    PromptFunction, 
+    LlmCommonOptions, 
+    LlmPromptOptions, 
+    LlmPromptParams,
+    normalizeOptions 
+} from "./createLlmClient.js";
 
-// Custom error for the querier to handle, allowing retries with structured feedback.
 export class LlmRetryError extends Error {
     constructor(
         public readonly message: string,
@@ -24,8 +29,6 @@ export class LlmRetryExhaustedError extends Error {
     }
 }
 
-// This error is thrown by LlmRetryClient for each failed attempt.
-// It wraps the underlying error (from API call or validation) and adds context.
 export class LlmRetryAttemptError extends Error {
     constructor(
         public readonly message: string,
@@ -45,14 +48,37 @@ export interface LlmRetryResponseInfo {
     attemptNumber: number;
 }
 
-export type LlmRetryOptions<T = any> = LlmPromptOptions & {
+/**
+ * Options for retry prompt functions.
+ * Extends common options with retry-specific settings.
+ */
+export interface LlmRetryOptions<T = any> extends LlmCommonOptions {
     maxRetries?: number;
     validate?: (response: any, info: LlmRetryResponseInfo) => Promise<T>;
-};
+}
+
+/**
+ * Internal params for retry functions - always has messages array.
+ */
+interface LlmRetryParams<T = any> extends LlmRetryOptions<T> {
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+}
 
 export interface CreateLlmRetryClientParams {
     prompt: PromptFunction;
     fallbackPrompt?: PromptFunction;
+}
+
+function normalizeRetryOptions<T>(
+    arg1: string | LlmPromptOptions,
+    arg2?: LlmRetryOptions<T>
+): LlmRetryParams<T> {
+    const baseParams = normalizeOptions(arg1, arg2);
+    return {
+        ...baseParams,
+        ...arg2,
+        messages: baseParams.messages
+    };
 }
 
 function constructLlmMessages(
@@ -61,12 +87,10 @@ function constructLlmMessages(
     previousError?: LlmRetryAttemptError
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
     if (attemptNumber === 0) {
-        // First attempt
         return initialMessages;
     }
 
     if (!previousError) {
-        // Should not happen for attempt > 0, but as a safeguard...
         throw new Error("Invariant violation: previousError is missing for a retry attempt.");
     }
     const cause = previousError.cause;
@@ -86,13 +110,10 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
     const { prompt, fallbackPrompt } = params;
 
     async function runPromptLoop<T>(
-        options: LlmRetryOptions<T>,
+        retryParams: LlmRetryParams<T>,
         responseType: 'raw' | 'text' | 'image'
     ): Promise<T> {
-        const { maxRetries = 3, validate, messages, ...restOptions } = options;
-        
-        // Ensure messages is an array (normalizeOptions ensures this but types might be loose)
-        const initialMessages = messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+        const { maxRetries = 3, validate, messages: initialMessages, ...restOptions } = retryParams;
 
         let lastError: LlmRetryAttemptError | undefined;
 
@@ -143,7 +164,6 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                     }
                 }
 
-                // Construct conversation history for success or potential error reporting
                 const finalConversation = [...currentMessages];
                 if (assistantMessage) {
                     finalConversation.push(assistantMessage);
@@ -164,15 +184,10 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
             } catch (error: any) {
                 if (error instanceof LlmRetryError) {
-                    // This is a recoverable error, so we'll create a detailed attempt error and continue the loop.
                     const conversationForError = [...currentMessages];
                     
-                    // If the error contains the raw response (e.g. the invalid text), add it to history
-                    // so the LLM knows what it generated previously.
                     if (error.rawResponse) {
                         conversationForError.push({ role: 'assistant', content: error.rawResponse });
-                    } else if (responseType === 'raw' && error.details) {
-                        // For raw mode, if we have details, maybe we can infer something, but usually rawResponse is key.
                     }
 
                     lastError = new LlmRetryAttemptError(
@@ -183,7 +198,6 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         { cause: error }
                     );
                 } else {
-                    // This is a non-recoverable error (e.g., network, API key), so we re-throw it immediately.
                     throw error;
                 }
             }
@@ -197,47 +211,47 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
 
     async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
         content: string,
-        options?: Omit<LlmRetryOptions<T>, 'messages'>
+        options?: LlmRetryOptions<T>
     ): Promise<T>;
     async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
-        options: LlmRetryOptions<T>
+        options: LlmPromptOptions & LlmRetryOptions<T>
     ): Promise<T>;
     async function promptRetry<T = OpenAI.Chat.Completions.ChatCompletion>(
-        arg1: string | LlmRetryOptions<T>,
-        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
+        arg1: string | (LlmPromptOptions & LlmRetryOptions<T>),
+        arg2?: LlmRetryOptions<T>
     ): Promise<T> {
-        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
-        return runPromptLoop(options, 'raw');
+        const retryParams = normalizeRetryOptions<T>(arg1, arg2);
+        return runPromptLoop(retryParams, 'raw');
     }
 
     async function promptTextRetry<T = string>(
         content: string,
-        options?: Omit<LlmRetryOptions<T>, 'messages'>
+        options?: LlmRetryOptions<T>
     ): Promise<T>;
     async function promptTextRetry<T = string>(
-        options: LlmRetryOptions<T>
+        options: LlmPromptOptions & LlmRetryOptions<T>
     ): Promise<T>;
     async function promptTextRetry<T = string>(
-        arg1: string | LlmRetryOptions<T>,
-        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
+        arg1: string | (LlmPromptOptions & LlmRetryOptions<T>),
+        arg2?: LlmRetryOptions<T>
     ): Promise<T> {
-        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
-        return runPromptLoop(options, 'text');
+        const retryParams = normalizeRetryOptions<T>(arg1, arg2);
+        return runPromptLoop(retryParams, 'text');
     }
 
     async function promptImageRetry<T = Buffer>(
         content: string,
-        options?: Omit<LlmRetryOptions<T>, 'messages'>
+        options?: LlmRetryOptions<T>
     ): Promise<T>;
     async function promptImageRetry<T = Buffer>(
-        options: LlmRetryOptions<T>
+        options: LlmPromptOptions & LlmRetryOptions<T>
     ): Promise<T>;
     async function promptImageRetry<T = Buffer>(
-        arg1: string | LlmRetryOptions<T>,
-        arg2?: Omit<LlmRetryOptions<T>, 'messages'>
+        arg1: string | (LlmPromptOptions & LlmRetryOptions<T>),
+        arg2?: LlmRetryOptions<T>
     ): Promise<T> {
-        const options = normalizeOptions(arg1, arg2) as LlmRetryOptions<T>;
-        return runPromptLoop(options, 'image');
+        const retryParams = normalizeRetryOptions<T>(arg1, arg2);
+        return runPromptLoop(retryParams, 'image');
     }
 
     return { promptRetry, promptTextRetry, promptImageRetry };

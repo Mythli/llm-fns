@@ -1,6 +1,6 @@
-import OpenAI from 'openai'; // Import the OpenAI library
+import OpenAI from 'openai';
 import * as z from "zod";
-import { ZodError, ZodTypeAny } from "zod";
+import { ZodTypeAny } from "zod";
 import { JsonSchemaClient, JsonSchemaLlmClientOptions } from "./createJsonSchemaLlmClient.js";
 
 export type ZodLlmClientOptions = JsonSchemaLlmClientOptions;

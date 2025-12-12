@@ -49,15 +49,13 @@ export function truncateSingleMessage(message: OpenAI.Chat.Completions.ChatCompl
     }
 
     if (Array.isArray(messageCopy.content)) {
-        // Complex case: multipart message.
-        // Strategy: consolidate text, remove images if needed, then truncate text.
         const textParts = messageCopy.content.filter((p: any) => p.type === 'text');
         const imageParts = messageCopy.content.filter((p: any) => p.type === 'image_url');
         let combinedText = textParts.map((p: any) => p.text).join('\n');
         let keptImages = [...imageParts];
 
         while (combinedText.length + (keptImages.length * 2500) > charLimit && keptImages.length > 0) {
-            keptImages.pop(); // remove images from the end
+            keptImages.pop();
         }
 
         const imageChars = keptImages.length * 2500;
@@ -98,7 +96,6 @@ export function truncateMessages(messages: OpenAI.Chat.Completions.ChatCompletio
     const mutableOtherMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = JSON.parse(JSON.stringify(otherMessages));
     let excessChars = totalChars - limit;
 
-    // Truncate messages starting from the second one.
     for (let i = 1; i < mutableOtherMessages.length; i++) {
         if (excessChars <= 0) break;
 
@@ -112,7 +109,6 @@ export function truncateMessages(messages: OpenAI.Chat.Completions.ChatCompletio
         excessChars -= charsToCut;
     }
 
-    // If still over limit, truncate the first message.
     if (excessChars > 0) {
         const firstMessage = mutableOtherMessages[0];
         const firstMessageChars = countChars(firstMessage);
@@ -121,7 +117,6 @@ export function truncateMessages(messages: OpenAI.Chat.Completions.ChatCompletio
         mutableOtherMessages[0] = truncateSingleMessage(firstMessage, newCharCount);
     }
 
-    // Filter out empty messages (char count is 0)
     const finalMessages = mutableOtherMessages.filter(msg => countChars(msg) > 0);
 
     return systemMessage ? [systemMessage, ...finalMessages] : finalMessages;
@@ -149,7 +144,6 @@ function concatMessageText(messages: OpenAI.Chat.Completions.ChatCompletionMessa
 
 function getPromptSummary(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]): string {
     const fullText = concatMessageText(messages);
-    // Replace multiple whitespace chars with a single space and trim.
     const cleanedText = fullText.replace(/\s+/g, ' ').trim();
 
     if (cleanedText.length <= 50) {
@@ -185,22 +179,78 @@ export type OpenRouterResponseFormat =
     };
 };
 
+/**
+ * Request-level options passed to the OpenAI SDK.
+ * These are separate from the body parameters.
+ */
+export interface LlmRequestOptions {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    timeout?: number;
+}
 
 /**
- * Options for the individual "prompt" function calls.
- * These can override defaults or add call-specific parameters.
- * 'messages' is a required property, inherited from OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming.
+ * Merges two LlmRequestOptions objects.
+ * Headers are merged (override wins on conflict), other properties are replaced.
  */
-export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, 'model' | 'response_format' | 'modalities' | 'messages'> {
-    messages: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-    model?: ModelConfig;    // Allow overriding the default model for a specific call
-    retries?: number;  // Number of retries for the API call.
+export function mergeRequestOptions(
+    base?: LlmRequestOptions,
+    override?: LlmRequestOptions
+): LlmRequestOptions | undefined {
+    if (!base && !override) return undefined;
+    if (!base) return override;
+    if (!override) return base;
+
+    return {
+        ...base,
+        ...override,
+        headers: {
+            ...base.headers,
+            ...override.headers
+        }
+    };
+}
+
+/**
+ * Common options shared by all prompt functions.
+ * Does NOT include messages - those are handled separately.
+ */
+export interface LlmCommonOptions {
+    model?: ModelConfig;
+    retries?: number;
     /** @deprecated Use `reasoning` object instead. */
     response_format?: OpenRouterResponseFormat;
     modalities?: string[];
     image_config?: {
         aspect_ratio?: string;
     };
+    requestOptions?: LlmRequestOptions;
+    temperature?: number;
+    max_tokens?: number;
+    top_p?: number;
+    frequency_penalty?: number;
+    presence_penalty?: number;
+    stop?: string | string[];
+    reasoning_effort?: 'low' | 'medium' | 'high';
+    seed?: number;
+    user?: string;
+    tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
+    tool_choice?: OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+}
+
+/**
+ * Options for the individual "prompt" function calls.
+ * Allows messages as string or array for convenience.
+ */
+export interface LlmPromptOptions extends LlmCommonOptions {
+    messages: string | OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+}
+
+/**
+ * Internal normalized params - messages is always an array.
+ */
+export interface LlmPromptParams extends LlmCommonOptions {
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
 }
 
 /**
@@ -209,12 +259,20 @@ export interface LlmPromptOptions extends Omit<OpenAI.Chat.Completions.ChatCompl
  */
 export interface CreateLlmClientParams {
     openai: OpenAI;
-    defaultModel: ModelConfig; // The default OpenAI model to use if not overridden in LlmPromptOptions
+    defaultModel: ModelConfig;
     maxConversationChars?: number;
     queue?: PQueue;
+    defaultRequestOptions?: LlmRequestOptions;
 }
 
-export function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): LlmPromptOptions {
+/**
+ * Normalizes input arguments to LlmPromptParams.
+ * Handles string shorthand and messages-as-string.
+ */
+export function normalizeOptions(
+    arg1: string | LlmPromptOptions, 
+    arg2?: LlmCommonOptions
+): LlmPromptParams {
     if (typeof arg1 === 'string') {
         return {
             messages: [{ role: 'user', content: arg1 }],
@@ -228,7 +286,7 @@ export function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<Ll
             messages: [{ role: 'user', content: options.messages }]
         };
     }
-    return options;
+    return options as LlmPromptParams;
 }
 
 /**
@@ -237,17 +295,26 @@ export function normalizeOptions(arg1: string | LlmPromptOptions, arg2?: Omit<Ll
  * @returns An async function `prompt` ready to make OpenAI calls.
  */
 export function createLlmClient(params: CreateLlmClientParams) {
-    const { openai, defaultModel: factoryDefaultModel, maxConversationChars, queue } = params;
+    const { 
+        openai, 
+        defaultModel: factoryDefaultModel, 
+        maxConversationChars, 
+        queue,
+        defaultRequestOptions 
+    } = params;
 
-    const getCompletionParams = (options: LlmPromptOptions) => {
-        const { model: callSpecificModel, messages, reasoning_effort, retries, ...restApiOptions } = options;
+    const getCompletionParams = (promptParams: LlmPromptParams) => {
+        const { 
+            model: callSpecificModel, 
+            messages, 
+            retries, 
+            requestOptions,
+            ...restApiOptions 
+        } = promptParams;
 
-        // Ensure messages is an array (it should be if normalized, but for safety/types)
-        const messagesArray = typeof messages === 'string'
-            ? [{ role: 'user', content: messages }] as OpenAI.Chat.Completions.ChatCompletionMessageParam[]
+        const finalMessages = maxConversationChars 
+            ? truncateMessages(messages, maxConversationChars) 
             : messages;
-
-        const finalMessages = maxConversationChars ? truncateMessages(messagesArray, maxConversationChars) : messagesArray;
 
         const baseConfig = typeof factoryDefaultModel === 'object' && factoryDefaultModel !== null
             ? factoryDefaultModel
@@ -272,21 +339,26 @@ export function createLlmClient(params: CreateLlmClientParams) {
             ...restApiOptions,
         };
 
-        return { completionParams, modelToUse, finalMessages, retries };
+        const mergedRequestOptions = mergeRequestOptions(defaultRequestOptions, requestOptions);
+
+        return { completionParams, modelToUse, finalMessages, retries, requestOptions: mergedRequestOptions };
     };
 
-    async function prompt(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion>;
+    async function prompt(content: string, options?: LlmCommonOptions): Promise<OpenAI.Chat.Completions.ChatCompletion>;
     async function prompt(options: LlmPromptOptions): Promise<OpenAI.Chat.Completions.ChatCompletion>;
-    async function prompt(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-        const options = normalizeOptions(arg1, arg2);
-        const { completionParams, finalMessages, retries } = getCompletionParams(options);
+    async function prompt(arg1: string | LlmPromptOptions, arg2?: LlmCommonOptions): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+        const promptParams = normalizeOptions(arg1, arg2);
+        const { completionParams, finalMessages, retries, requestOptions } = getCompletionParams(promptParams);
 
         const promptSummary = getPromptSummary(finalMessages);
 
         const apiCall = async (): Promise<OpenAI.Chat.Completions.ChatCompletion> => {
             const task = () => executeWithRetry<OpenAI.Chat.Completions.ChatCompletion, OpenAI.Chat.Completions.ChatCompletion>(
                 async () => {
-                    return openai.chat.completions.create(completionParams as any);
+                    return openai.chat.completions.create(
+                        completionParams as any,
+                        requestOptions
+                    );
                 },
                 async (completion) => {
                     if((completion as any).error) {
@@ -300,7 +372,6 @@ export function createLlmClient(params: CreateLlmClientParams) {
                 retries ?? 3,
                 undefined,
                 (error: any) => {
-                    // Do not retry if the API key is invalid (401) or if the error code explicitly states it.
                     if (error?.status === 401 || error?.code === 'invalid_api_key') {
                         return false;
                     }
@@ -315,11 +386,11 @@ export function createLlmClient(params: CreateLlmClientParams) {
         return apiCall();
     }
 
-    async function promptText(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<string>;
+    async function promptText(content: string, options?: LlmCommonOptions): Promise<string>;
     async function promptText(options: LlmPromptOptions): Promise<string>;
-    async function promptText(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<string> {
-        const options = normalizeOptions(arg1, arg2);
-        const response = await prompt(options);
+    async function promptText(arg1: string | LlmPromptOptions, arg2?: LlmCommonOptions): Promise<string> {
+        const promptParams = normalizeOptions(arg1, arg2);
+        const response = await prompt(promptParams);
         const content = response.choices[0]?.message?.content;
         if (content === null || content === undefined) {
             throw new Error("LLM returned no text content.");
@@ -327,11 +398,11 @@ export function createLlmClient(params: CreateLlmClientParams) {
         return content;
     }
 
-    async function promptImage(content: string, options?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer>;
+    async function promptImage(content: string, options?: LlmCommonOptions): Promise<Buffer>;
     async function promptImage(options: LlmPromptOptions): Promise<Buffer>;
-    async function promptImage(arg1: string | LlmPromptOptions, arg2?: Omit<LlmPromptOptions, 'messages'>): Promise<Buffer> {
-        const options = normalizeOptions(arg1, arg2);
-        const response = await prompt(options);
+    async function promptImage(arg1: string | LlmPromptOptions, arg2?: LlmCommonOptions): Promise<Buffer> {
+        const promptParams = normalizeOptions(arg1, arg2);
+        const response = await prompt(promptParams);
         const message = response.choices[0]?.message as any;
 
         if (message.images && Array.isArray(message.images) && message.images.length > 0) {

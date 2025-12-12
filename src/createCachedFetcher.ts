@@ -1,28 +1,20 @@
-// src/createCachedFetcher.ts
-
 import crypto from 'crypto';
 
-// Define a minimal interface for the cache to avoid tight coupling with cache-manager versions
-// and to support the new v7 API which might not export 'Cache' in the same way.
 export interface CacheLike {
     get<T>(key: string): Promise<T | undefined | null>;
     set(key: string, value: any, ttl?: number): Promise<any>;
 }
 
-// Define a custom options type that extends RequestInit with our custom `ttl` property.
 export type FetcherOptions = RequestInit & {
     /** Optional TTL override for this specific request, in milliseconds. */
     ttl?: number;
 };
 
-// Define the shape of the function we are creating and exporting.
-// It must match the native fetch signature, but with our custom options.
 export type Fetcher = (
     url: string | URL | Request,
     options?: FetcherOptions
 ) => Promise<Response>;
 
-// Define the dependencies needed to create our cached fetcher.
 export interface CreateFetcherDependencies {
     /** The cache instance (e.g., from cache-manager). */
     cache?: CacheLike;
@@ -30,12 +22,7 @@ export interface CreateFetcherDependencies {
     prefix?: string;
     /** Time-to-live for cache entries, in milliseconds. */
     ttl?: number;
-    /** Request timeout in milliseconds. If not provided, no timeout is applied.**Restoring Corrected File**
-
-I'm now generating the corrected version of `src/createCachedFetcher.ts`. The primary fix is removing the extraneous text from the `set` method signature within the `CacheLike` interface. I've ensured the syntax is correct, and I'm confident the test run should now pass. After this is output, I plan to assess its integration within the wider project.
-
-
- */
+    /** Request timeout in milliseconds. If not provided, no timeout is applied. */
     timeout?: number;
     /** User-Agent string for requests. */
     userAgent?: string;
@@ -49,17 +36,13 @@ I'm now generating the corrected version of `src/createCachedFetcher.ts`. The pr
     shouldCache?: (response: Response) => Promise<boolean> | boolean;
 }
 
-// The data we store in the cache. Kept internal to this module.
-// The body is stored as a base64 string to ensure proper serialization in Redis.
 interface CacheData {
     bodyBase64: string;
     headers: Record<string, string>;
     status: number;
-    finalUrl: string; // Crucial for resolving relative URLs on cache HITs
+    finalUrl: string;
 }
 
-// A custom Response class to correctly handle the `.url` property on cache HITs.
-// This is an implementation detail and doesn't need to be exported.
 export class CachedResponse extends Response {
     #finalUrl: string;
 
@@ -68,10 +51,38 @@ export class CachedResponse extends Response {
         this.#finalUrl = finalUrl;
     }
 
-    // Override the read-only `url` property
     get url() {
         return this.#finalUrl;
     }
+}
+
+/**
+ * Creates a deterministic hash of headers for cache key generation.
+ * Headers are sorted alphabetically to ensure consistency.
+ */
+function hashHeaders(headers?: HeadersInit): string {
+    if (!headers) return '';
+    
+    let headerEntries: [string, string][];
+    
+    if (headers instanceof Headers) {
+        headerEntries = Array.from(headers.entries());
+    } else if (Array.isArray(headers)) {
+        headerEntries = headers as [string, string][];
+    } else {
+        headerEntries = Object.entries(headers);
+    }
+    
+    if (headerEntries.length === 0) return '';
+    
+    // Sort alphabetically by key for deterministic ordering
+    headerEntries.sort((a, b) => a[0].localeCompare(b[0]));
+    
+    const headerString = headerEntries
+        .map(([key, value]) => `${key}:${value}`)
+        .join('|');
+    
+    return crypto.createHash('md5').update(headerString).digest('hex');
 }
 
 /**
@@ -85,8 +96,6 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
     const fetchImpl = customFetch ?? fetch;
 
     const fetchWithTimeout = async (url: string | URL | Request, options?: RequestInit): Promise<Response> => {
-        // Correctly merge headers using Headers API to handle various input formats (plain object, Headers instance, array)
-        // and avoid issues with spreading Headers objects which can lead to lost headers or Symbol errors.
         const headers = new Headers(options?.headers);
         if (userAgent) {
             headers.set('User-Agent', userAgent);
@@ -128,10 +137,7 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
         }
     };
 
-    // This is the actual fetcher implementation, returned by the factory.
-    // It "closes over" the dependencies provided to the factory.
     return async (url: string | URL | Request, options?: FetcherOptions): Promise<Response> => {
-        // Determine the request method. Default to GET for fetch.
         let method = 'GET';
         if (options?.method) {
             method = options.method;
@@ -148,7 +154,7 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
 
         let cacheKey = `${prefix}:${urlString}`;
 
-        // If POST (or others with body), append hash of body to cache key
+        // Hash body for POST requests
         if (method.toUpperCase() === 'POST' && options?.body) {
             let bodyStr = '';
             if (typeof options.body === 'string') {
@@ -156,7 +162,6 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
             } else if (options.body instanceof URLSearchParams) {
                 bodyStr = options.body.toString();
             } else {
-                // Fallback for other types, though mostly we expect string/JSON here
                 try {
                     bodyStr = JSON.stringify(options.body);
                 } catch (e) {
@@ -164,14 +169,19 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
                 }
             }
 
-            const hash = crypto.createHash('md5').update(bodyStr).digest('hex');
-            cacheKey += `:${hash}`;
+            const bodyHash = crypto.createHash('md5').update(bodyStr).digest('hex');
+            cacheKey += `:body:${bodyHash}`;
+        }
+
+        // Hash all request headers into cache key
+        const headersHash = hashHeaders(options?.headers);
+        if (headersHash) {
+            cacheKey += `:headers:${headersHash}`;
         }
 
         // 1. Check the cache
         const cachedItem = await cache.get<CacheData>(cacheKey);
         if (cachedItem) {
-            // Decode the base64 body back into a Buffer.
             const body = Buffer.from(cachedItem.bodyBase64, 'base64');
             return new CachedResponse(
                 body,
@@ -200,7 +210,6 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
                         isCacheable = false;
                     }
                 } else {
-                    // Default behavior: check for .error in JSON responses
                     const contentType = response.headers.get('content-type');
                     if (contentType && contentType.includes('application/json')) {
                         const checkClone = response.clone();
@@ -219,7 +228,6 @@ export function createCachedFetcher(deps: CreateFetcherDependencies): Fetcher {
                 if (isCacheable) {
                     const responseClone = response.clone();
                     const bodyBuffer = await responseClone.arrayBuffer();
-                    // Convert ArrayBuffer to a base64 string for safe JSON serialization.
                     const bodyBase64 = Buffer.from(bodyBuffer).toString('base64');
                     const headers = Object.fromEntries(response.headers.entries());
 
