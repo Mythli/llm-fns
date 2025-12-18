@@ -169,12 +169,9 @@ ${brokenResponse}
             }
             return validator(jsonData);
         } catch (validationError: any) {
-            // Only attempt to fix known validation errors (Zod or our SchemaValidationError).
+            // Only attempt to fix known validation errors (SchemaValidationError).
             // Arbitrary errors thrown by custom validators (e.g. "Database Error") should bubble up.
-            const isZodError = validationError.name === 'ZodError';
-            const isSchemaError = validationError instanceof SchemaValidationError;
-
-            if (!isZodError && !isSchemaError) {
+            if (!(validationError instanceof SchemaValidationError)) {
                 throw validationError;
             }
 
@@ -294,10 +291,7 @@ The response provided was not valid JSON. Please correct it.`;
                 return validatedData;
             } catch (validationError: any) {
                 // Only wrap known validation errors for retry.
-                const isZodError = validationError.name === 'ZodError';
-                const isSchemaError = validationError instanceof SchemaValidationError;
-
-                if (isZodError || isSchemaError) {
+                if (validationError instanceof SchemaValidationError) {
                     const rawResponseForError = JSON.stringify(jsonData, null, 2);
                     const errorDetails = validationError.message;
                     const errorMessage = `Your previous response resulted in an error.

@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import * as z from "zod";
 import { ZodTypeAny } from "zod";
-import { JsonSchemaClient, JsonSchemaLlmClientOptions } from "./createJsonSchemaLlmClient.js";
+import { JsonSchemaClient, JsonSchemaLlmClientOptions, SchemaValidationError } from "./createJsonSchemaLlmClient.js";
 
 export type ZodLlmClientOptions = JsonSchemaLlmClientOptions;
 
@@ -114,7 +114,18 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
         }) as Record<string, any>;
 
         const zodValidator = (data: any) => {
-            return dataExtractionSchema.parse(data);
+            try {
+                return dataExtractionSchema.parse(data);
+            } catch (error: any) {
+                if (error instanceof z.ZodError) {
+                    const errorMessages = error.errors.map((e: any) => {
+                        const path = e.path.length > 0 ? e.path.join('.') : '<root>';
+                        return `${path}: ${e.message}`;
+                    }).join('\n');
+                    throw new SchemaValidationError(errorMessages, error.errors);
+                }
+                throw error;
+            }
         };
 
         const result = await jsonSchemaClient.promptJson(messages, schema, {
