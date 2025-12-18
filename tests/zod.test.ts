@@ -12,7 +12,7 @@ function createMockPrompt(responses: string[]) {
     return vi.fn(async (...args: any[]) => {
         const content = responses[callCount] || responses[responses.length - 1];
         callCount++;
-        
+
         return {
             id: 'mock-id',
             object: 'chat.completion',
@@ -50,7 +50,7 @@ describe('Zod Structured Output Integration', () => {
 
         expect(result).toBeDefined();
         expect(result.items).toHaveLength(2);
-        
+
         const apple = result.items.find(i => i.name.toLowerCase().includes('apple'));
         expect(apple).toBeDefined();
         expect(apple?.quantity).toBe(3);
@@ -110,12 +110,12 @@ describe('Zod Structured Output Integration', () => {
             });
 
             const result = await client.promptZod("test", "test", Schema);
-            
+
             expect(result.age).toBe(20);
-            // We expect at least 2 calls (initial + fix). 
+            // We expect at least 2 calls (initial + fix).
             // Exact count might vary if internal retry logic is aggressive.
             expect(mockPrompt.mock.calls.length).toBeGreaterThanOrEqual(2);
-            
+
             // The second call should be the fixer prompt
             // args[0] is options object
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
@@ -137,10 +137,10 @@ describe('Zod Structured Output Integration', () => {
             });
 
             const result = await client.promptZod("test", "test", Schema);
-            
+
             expect(result.age).toBe(20);
             expect(mockPrompt).toHaveBeenCalledTimes(2);
-            
+
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
             expect(secondCallArgs.messages[1].content).toContain('Schema Validation Error');
         });
@@ -161,10 +161,10 @@ describe('Zod Structured Output Integration', () => {
             });
 
             const result = await client.promptZod("test", "test", Schema);
-            
+
             expect(result.age).toBe(20);
             expect(mockPrompt).toHaveBeenCalledTimes(2);
-            
+
             // In the main loop, the history is preserved and error is added as user message
             const secondCallArgs = mockPrompt.mock.calls[1][0] as any;
             const messages = secondCallArgs.messages;
@@ -178,7 +178,7 @@ describe('Zod Structured Output Integration', () => {
             const mockMainPrompt = createMockPrompt([
                 '{"age": "wrong"}' // Fails schema
             ]);
-            
+
             const mockFallbackPrompt = createMockPrompt([
                 '{"age": 20}' // Succeeds
             ]);
@@ -194,7 +194,7 @@ describe('Zod Structured Output Integration', () => {
             });
 
             const result = await client.promptZod("test", "test", Schema);
-            
+
             expect(result.age).toBe(20);
             expect(mockMainPrompt).toHaveBeenCalledTimes(1);
             expect(mockFallbackPrompt).toHaveBeenCalledTimes(1);
@@ -218,7 +218,7 @@ describe('Zod Structured Output Integration', () => {
 
             await expect(client.promptZod("test", "test", Schema, { maxRetries: 1 }))
                 .rejects.toThrow(LlmRetryExhaustedError);
-            
+
             expect(mockPrompt).toHaveBeenCalledTimes(2); // Initial + 1 retry
         });
 
@@ -244,14 +244,14 @@ describe('Zod Structured Output Integration', () => {
                 throw new Error('Should have thrown LlmRetryExhaustedError');
             } catch (error: any) {
                 expect(error).toBeInstanceOf(LlmRetryExhaustedError);
-                
+
                 // Verify the chain structure:
                 // LlmRetryExhaustedError
                 //   -> cause: LlmRetryAttemptError (Attempt 3)
                 //      -> cause: LlmRetryAttemptError (Attempt 2)
                 //         -> cause: LlmRetryAttemptError (Attempt 1)
                 //            -> cause: undefined (Attempt 1 has no previous error)
-                
+
                 const attempt3 = error.cause;
                 expect(attempt3).toBeInstanceOf(LlmRetryAttemptError);
                 expect(attempt3.attemptNumber).toBe(2);
@@ -266,7 +266,7 @@ describe('Zod Structured Output Integration', () => {
                 expect(attempt1).toBeInstanceOf(LlmRetryAttemptError);
                 expect(attempt1.attemptNumber).toBe(0);
                 expect(attempt1.message).toContain('Attempt 1 failed');
-                
+
                 // The root cause of the first attempt should be the validation error wrapper
                 // stored in the .error property, NOT .cause (which is the previous attempt error)
                 expect(attempt1.error.name).toBe('LlmRetryError');
@@ -299,12 +299,12 @@ describe('Zod Structured Output Integration', () => {
                 throw new Error('Should have thrown');
             } catch (error: any) {
                 expect(error).toBeInstanceOf(LlmRetryExhaustedError);
-                expect(error.message).toContain('Fatal error');
+                expect(error.message).toContain('fatal error');
 
                 const attemptError = error.cause;
                 expect(attemptError).toBeInstanceOf(LlmRetryAttemptError);
                 expect(attemptError.error).toBe(fatalError);
-                
+
                 // Check if context is preserved
                 expect(attemptError.conversation).toBeDefined();
                 expect(attemptError.conversation.length).toBeGreaterThan(0);
