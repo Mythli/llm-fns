@@ -37,6 +37,7 @@ export class LlmRetryAttemptError extends Error {
         public readonly conversation: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         public readonly attemptNumber: number,
         public readonly error: Error,
+        public readonly rawResponse?: string | null,
         options?: ErrorOptions
     ) {
         super(message, options);
@@ -193,6 +194,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         currentMessages,
                         attempt,
                         error,
+                        error.rawResponse,
                         { cause: lastError }
                     );
                     throw new LlmRetryExhaustedError(
@@ -214,6 +216,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         conversationForError, 
                         attempt,
                         error,
+                        error.rawResponse,
                         { cause: lastError }
                     );
                 } else {

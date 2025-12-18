@@ -4,7 +4,12 @@ import type PQueue from 'p-queue';
 import { executeWithRetry } from './retryUtils.js';
 
 export class LlmFatalError extends Error {
-    constructor(message: string, public readonly cause?: any) {
+    constructor(
+        message: string, 
+        public readonly cause?: any,
+        public readonly messages?: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        public readonly rawResponse?: string | null
+    ) {
         super(message);
         this.name = 'LlmFatalError';
         this.cause = cause;
@@ -307,7 +312,7 @@ export function createLlmClient(params: CreateLlmClientParams) {
         openai, 
         defaultModel: factoryDefaultModel, 
         maxConversationChars, 
-        queue,
+        queue, 
         defaultRequestOptions 
     } = params;
 
@@ -370,7 +375,7 @@ export function createLlmClient(params: CreateLlmClientParams) {
                         );
                     } catch (error: any) {
                         if (error?.status === 400 || error?.status === 401 || error?.status === 403) {
-                            throw new LlmFatalError(error.message || 'Fatal API Error', error);
+                            throw new LlmFatalError(error.message || 'Fatal API Error', error, finalMessages);
                         }
                         throw error;
                     }
