@@ -4,7 +4,8 @@ import {
     LlmCommonOptions, 
     LlmPromptOptions, 
     LlmPromptParams,
-    normalizeOptions 
+    normalizeOptions,
+    LlmFatalError
 } from "./createLlmClient.js";
 
 export class LlmRetryError extends Error {
@@ -35,6 +36,7 @@ export class LlmRetryAttemptError extends Error {
         public readonly mode: 'main' | 'fallback',
         public readonly conversation: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         public readonly attemptNumber: number,
+        public readonly previousError?: LlmRetryAttemptError,
         options?: ErrorOptions
     ) {
         super(message, options);
@@ -183,6 +185,21 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                 return dataToProcess as T;
 
             } catch (error: any) {
+                if (error instanceof LlmFatalError) {
+                    const fatalAttemptError = new LlmRetryAttemptError(
+                        `Fatal error on attempt ${attempt + 1}: ${error.message}`,
+                        mode,
+                        currentMessages,
+                        attempt,
+                        lastError,
+                        { cause: error }
+                    );
+                    throw new LlmRetryExhaustedError(
+                        `Operation failed with fatal error on attempt ${attempt + 1}.`,
+                        { cause: fatalAttemptError }
+                    );
+                }
+
                 if (error instanceof LlmRetryError) {
                     const conversationForError = [...currentMessages];
                     
@@ -195,6 +212,7 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         mode,
                         conversationForError, 
                         attempt,
+                        lastError,
                         { cause: error }
                     );
                 } else {

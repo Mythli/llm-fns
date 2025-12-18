@@ -3,6 +3,14 @@ import OpenAI from "openai";
 import type PQueue from 'p-queue';
 import { executeWithRetry } from './retryUtils.js';
 
+export class LlmFatalError extends Error {
+    constructor(message: string, public readonly cause?: any) {
+        super(message);
+        this.name = 'LlmFatalError';
+        this.cause = cause;
+    }
+}
+
 export function countChars(message: OpenAI.Chat.Completions.ChatCompletionMessageParam): number {
     if (!message.content) return 0;
     if (typeof message.content === 'string') {
@@ -355,10 +363,17 @@ export function createLlmClient(params: CreateLlmClientParams) {
         const apiCall = async (): Promise<OpenAI.Chat.Completions.ChatCompletion> => {
             const task = () => executeWithRetry<OpenAI.Chat.Completions.ChatCompletion, OpenAI.Chat.Completions.ChatCompletion>(
                 async () => {
-                    return openai.chat.completions.create(
-                        completionParams as any,
-                        requestOptions
-                    );
+                    try {
+                        return await openai.chat.completions.create(
+                            completionParams as any,
+                            requestOptions
+                        );
+                    } catch (error: any) {
+                        if (error?.status === 400 || error?.status === 401 || error?.status === 403) {
+                            throw new LlmFatalError(error.message || 'Fatal API Error', error);
+                        }
+                        throw error;
+                    }
                 },
                 async (completion) => {
                     if((completion as any).error) {
@@ -372,7 +387,8 @@ export function createLlmClient(params: CreateLlmClientParams) {
                 retries ?? 3,
                 undefined,
                 (error: any) => {
-                    if (error?.status === 401 || error?.code === 'invalid_api_key') {
+                    if (error instanceof LlmFatalError) return false;
+                    if (error?.status === 400 || error?.status === 401 || error?.status === 403 || error?.code === 'invalid_api_key') {
                         return false;
                     }
                     return true;
