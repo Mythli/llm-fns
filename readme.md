@@ -328,6 +328,68 @@ const result = await llm.promptZod(MySchema, {
 });
 ```
 
+### Level 4: Retryable Errors in Zod Transforms
+
+You can throw `SchemaValidationError` inside Zod `.transform()` or `.refine()` to trigger the retry loop. This is useful for complex validation logic that can't be expressed in the schema itself.
+
+```typescript
+import { z } from 'zod';
+import { SchemaValidationError } from './src';
+
+const ProductSchema = z.object({
+    name: z.string(),
+    price: z.number(),
+    currency: z.string()
+}).transform((data) => {
+    // Custom validation that triggers retry
+    if (data.price < 0) {
+        throw new SchemaValidationError(
+            `Price cannot be negative. Got: ${data.price}. Please provide a valid positive price.`
+        );
+    }
+    
+    // Normalize currency
+    const validCurrencies = ['USD', 'EUR', 'GBP'];
+    if (!validCurrencies.includes(data.currency.toUpperCase())) {
+        throw new SchemaValidationError(
+            `Invalid currency "${data.currency}". Must be one of: ${validCurrencies.join(', ')}`
+        );
+    }
+    
+    return {
+        ...data,
+        currency: data.currency.toUpperCase()
+    };
+});
+
+// If the LLM returns { price: -10, ... }, the error message is sent back
+// and the LLM gets another chance to fix it
+const product = await llm.promptZod("Extract product info from: ...", ProductSchema);
+```
+
+**Important:** Only `SchemaValidationError` triggers the retry loop. Other errors (like `TypeError`, database errors, etc.) will bubble up immediately without retry. This prevents infinite loops when there's a bug in your transform logic.
+
+```typescript
+const SafeSchema = z.object({
+    userId: z.string()
+}).transform(async (data) => {
+    // This error WILL trigger retry (user can fix the input)
+    if (!data.userId.match(/^[a-z0-9]+$/)) {
+        throw new SchemaValidationError(
+            `Invalid userId format "${data.userId}". Must be lowercase alphanumeric.`
+        );
+    }
+    
+    // This error will NOT trigger retry (it's a system error)
+    const user = await db.findUser(data.userId);
+    if (!user) {
+        throw new Error(`User not found: ${data.userId}`); // Bubbles up immediately
+    }
+    
+    return { ...data, user };
+});
+```
+
 ---
 
 # Use Case 4: Agentic Retry Loops (`llm.promptTextRetry`)
@@ -354,6 +416,152 @@ const poem = await llm.promptTextRetry({
         return text;
     }
 });
+```
+
+---
+
+# Error Handling
+
+The library provides a structured error hierarchy that preserves the full context of failures across retry attempts.
+
+## Error Types
+
+### `LlmRetryError`
+Thrown to signal that the current attempt failed but can be retried. The error message is sent back to the LLM.
+
+```typescript
+import { LlmRetryError } from './src';
+
+throw new LlmRetryError(
+    "The response must include a title field.",  // Message sent to LLM
+    'CUSTOM_ERROR',                               // Type: 'JSON_PARSE_ERROR' | 'CUSTOM_ERROR'
+    { field: 'title' },                           // Optional details
+    '{"name": "test"}'                            // Optional raw response
+);
+```
+
+### `SchemaValidationError`
+A specialized error for schema validation failures. Use this in Zod transforms to trigger retries.
+
+```typescript
+import { SchemaValidationError } from './src';
+
+throw new SchemaValidationError("Age must be a positive number");
+```
+
+### `LlmRetryAttemptError`
+Wraps each failed attempt with full context. These are chained together via `.cause`.
+
+```typescript
+interface LlmRetryAttemptError {
+    message: string;
+    mode: 'main' | 'fallback';           // Which prompt was used
+    conversation: ChatCompletionMessageParam[];  // Full message history
+    attemptNumber: number;               // 0-indexed attempt number
+    error: Error;                        // The original error (LlmRetryError, etc.)
+    rawResponse?: string | null;         // The raw LLM response
+    cause?: LlmRetryAttemptError;        // Previous attempt's error (chain)
+}
+```
+
+### `LlmRetryExhaustedError`
+Thrown when all retry attempts have been exhausted. Contains the full chain of attempt errors.
+
+```typescript
+interface LlmRetryExhaustedError {
+    message: string;
+    cause: LlmRetryAttemptError;  // The last attempt error (with chain to previous)
+}
+```
+
+### `LlmFatalError`
+Thrown for unrecoverable errors (e.g., 401 Unauthorized, 403 Forbidden). These bypass the retry loop entirely.
+
+```typescript
+interface LlmFatalError {
+    message: string;
+    cause?: any;                         // Original error
+    messages?: ChatCompletionMessageParam[];  // The messages that caused the error
+    rawResponse?: string | null;         // Raw response if available
+}
+```
+
+## Error Chain Structure
+
+When retries are exhausted, the error chain looks like this:
+
+```
+LlmRetryExhaustedError
+  └── cause: LlmRetryAttemptError (Attempt 3)
+        ├── error: LlmRetryError (the validation error)
+        ├── conversation: [...] (full message history)
+        ├── rawResponse: '{"age": "wrong3"}'
+        └── cause: LlmRetryAttemptError (Attempt 2)
+              ├── error: LlmRetryError
+              ├── conversation: [...]
+              ├── rawResponse: '{"age": "wrong2"}'
+              └── cause: LlmRetryAttemptError (Attempt 1)
+                    ├── error: LlmRetryError
+                    ├── conversation: [...]
+                    ├── rawResponse: '{"age": "wrong1"}'
+                    └── cause: undefined
+```
+
+## Handling Errors
+
+```typescript
+import { 
+    LlmRetryExhaustedError, 
+    LlmRetryAttemptError,
+    LlmFatalError 
+} from './src';
+
+try {
+    const result = await llm.promptZod(MySchema);
+} catch (error) {
+    if (error instanceof LlmRetryExhaustedError) {
+        console.log('All retries failed');
+        
+        // Walk the error chain
+        let attempt = error.cause;
+        while (attempt) {
+            console.log(`Attempt ${attempt.attemptNumber + 1}:`);
+            console.log(`  Mode: ${attempt.mode}`);
+            console.log(`  Error: ${attempt.error.message}`);
+            console.log(`  Raw Response: ${attempt.rawResponse}`);
+            console.log(`  Conversation length: ${attempt.conversation.length}`);
+            
+            attempt = attempt.cause as LlmRetryAttemptError | undefined;
+        }
+    }
+    
+    if (error instanceof LlmFatalError) {
+        console.log('Fatal error (no retry):', error.message);
+        console.log('Original messages:', error.messages);
+    }
+}
+```
+
+## Extracting the Last Response
+
+A common pattern is to extract the last LLM response from a failed operation:
+
+```typescript
+function getLastResponse(error: LlmRetryExhaustedError): string | null {
+    return error.cause?.rawResponse ?? null;
+}
+
+function getAllResponses(error: LlmRetryExhaustedError): string[] {
+    const responses: string[] = [];
+    let attempt = error.cause;
+    while (attempt) {
+        if (attempt.rawResponse) {
+            responses.unshift(attempt.rawResponse); // Add to front (chronological order)
+        }
+        attempt = attempt.cause as LlmRetryAttemptError | undefined;
+    }
+    return responses;
+}
 ```
 
 ---
