@@ -36,7 +36,7 @@ export class LlmRetryAttemptError extends Error {
         public readonly mode: 'main' | 'fallback',
         public readonly conversation: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         public readonly attemptNumber: number,
-        public readonly previousError?: LlmRetryAttemptError,
+        public readonly error: Error,
         options?: ErrorOptions
     ) {
         super(message, options);
@@ -95,7 +95,8 @@ function constructLlmMessages(
     if (!previousError) {
         throw new Error("Invariant violation: previousError is missing for a retry attempt.");
     }
-    const cause = previousError.cause;
+    
+    const cause = previousError.error;
 
     if (!(cause instanceof LlmRetryError)) {
         throw Error('cause must be an instanceof LlmRetryError')
@@ -191,8 +192,8 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         mode,
                         currentMessages,
                         attempt,
-                        lastError,
-                        { cause: error }
+                        error,
+                        { cause: lastError }
                     );
                     throw new LlmRetryExhaustedError(
                         `Operation failed with fatal error on attempt ${attempt + 1}.`,
@@ -208,12 +209,12 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                     }
 
                     lastError = new LlmRetryAttemptError(
-                        `Attempt ${attempt + 1} failed.`,
+                        `Attempt ${attempt + 1} failed: ${error.message}`,
                         mode,
                         conversationForError, 
                         attempt,
-                        lastError,
-                        { cause: error }
+                        error,
+                        { cause: lastError }
                     );
                 } else {
                     throw error;
