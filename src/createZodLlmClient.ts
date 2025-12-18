@@ -118,11 +118,7 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
                 return dataExtractionSchema.parse(data);
             } catch (error: any) {
                 if (error instanceof z.ZodError) {
-                    const errorMessages = error.errors.map((e: any) => {
-                        const path = e.path.length > 0 ? e.path.join('.') : '<root>';
-                        return `${path}: ${e.message}`;
-                    }).join('\n');
-                    throw new SchemaValidationError(errorMessages, { cause: error });
+                    throw new SchemaValidationError(error.toString(), { cause: error });
                 }
                 throw error;
             }
