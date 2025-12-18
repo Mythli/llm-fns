@@ -249,7 +249,7 @@ describe('Zod Structured Output Integration', () => {
                 //   -> cause: LlmRetryAttemptError (Attempt 3)
                 //      -> cause: LlmRetryAttemptError (Attempt 2)
                 //         -> cause: LlmRetryAttemptError (Attempt 1)
-                //            -> cause: LlmRetryError (The actual validation error)
+                //            -> cause: undefined (Attempt 1 has no previous error)
                 
                 const attempt3 = error.cause;
                 expect(attempt3).toBeInstanceOf(LlmRetryAttemptError);
@@ -267,8 +267,9 @@ describe('Zod Structured Output Integration', () => {
                 expect(attempt1.message).toContain('Attempt 1 failed');
                 
                 // The root cause of the first attempt should be the validation error wrapper
-                expect(attempt1.cause.name).toBe('LlmRetryError');
-                expect(attempt1.cause.message).toContain('SCHEMA_VALIDATION_ERROR');
+                // stored in the .error property, NOT .cause (which is the previous attempt error)
+                expect(attempt1.error.name).toBe('LlmRetryError');
+                expect(attempt1.error.message).toContain('SCHEMA_VALIDATION_ERROR');
             }
         });
     });
