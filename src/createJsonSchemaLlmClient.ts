@@ -7,6 +7,13 @@ import {
 } from "./createLlmClient.js";
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 
+export class SchemaValidationError extends Error {
+    constructor(message: string, public errors?: any[]) {
+        super(message);
+        this.name = 'SchemaValidationError';
+    }
+}
+
 /**
  * Options for JSON schema prompt functions.
  * Extends common options with JSON-specific settings.
@@ -125,6 +132,12 @@ ${brokenResponse}
         try {
             return JSON.parse(jsonDataToParse);
         } catch (parseError: any) {
+            // Only attempt to fix SyntaxErrors (JSON parsing errors).
+            // Other errors (like runtime errors) should bubble up.
+            if (!(parseError instanceof SyntaxError)) {
+                throw parseError;
+            }
+
             if (disableJsonFixer) {
                 throw parseError;
             }
@@ -156,6 +169,15 @@ ${brokenResponse}
             }
             return validator(jsonData);
         } catch (validationError: any) {
+            // Only attempt to fix known validation errors (Zod or our SchemaValidationError).
+            // Arbitrary errors thrown by custom validators (e.g. "Database Error") should bubble up.
+            const isZodError = validationError.name === 'ZodError';
+            const isSchemaError = validationError instanceof SchemaValidationError;
+
+            if (!isZodError && !isSchemaError) {
+                throw validationError;
+            }
+
             if (disableJsonFixer) {
                 throw validationError;
             }
@@ -229,7 +251,7 @@ ${schemaJsonString}`;
                 const valid = validate(data);
                 if (!valid) {
                     const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
-                    throw new Error(`AJV Validation Error: ${errors}`);
+                    throw new SchemaValidationError(`AJV Validation Error: ${errors}`, validate.errors || []);
                 }
                 return data as T;
             } catch(error: any) {
@@ -250,34 +272,47 @@ ${schemaJsonString}`;
             try {
                 jsonData = await _parseOrFixJson(llmResponseString, schemaJsonString, options);
             } catch (parseError: any) {
-                const errorMessage = `Your previous response resulted in an error.
+                // Only wrap SyntaxErrors (JSON parse errors) for retry.
+                if (parseError instanceof SyntaxError) {
+                    const errorMessage = `Your previous response resulted in an error.
 Error Type: JSON_PARSE_ERROR
 Error Details: ${parseError.message}
 The response provided was not valid JSON. Please correct it.`;
-                throw new LlmRetryError(
-                    errorMessage,
-                    'JSON_PARSE_ERROR',
-                    undefined,
-                    llmResponseString
-                );
+                    throw new LlmRetryError(
+                        errorMessage,
+                        'JSON_PARSE_ERROR',
+                        undefined,
+                        llmResponseString
+                    );
+                }
+                // Rethrow other errors (e.g. fatal errors, runtime errors)
+                throw parseError;
             }
 
             try {
                 const validatedData = await _validateOrFix(jsonData, validator, schemaJsonString, options);
                 return validatedData;
             } catch (validationError: any) {
-                const rawResponseForError = JSON.stringify(jsonData, null, 2);
-                const errorDetails = validationError.message;
-                const errorMessage = `Your previous response resulted in an error.
+                // Only wrap known validation errors for retry.
+                const isZodError = validationError.name === 'ZodError';
+                const isSchemaError = validationError instanceof SchemaValidationError;
+
+                if (isZodError || isSchemaError) {
+                    const rawResponseForError = JSON.stringify(jsonData, null, 2);
+                    const errorDetails = validationError.message;
+                    const errorMessage = `Your previous response resulted in an error.
 Error Type: SCHEMA_VALIDATION_ERROR
 Error Details: ${errorDetails}
 The response was valid JSON but did not conform to the required schema. Please review the errors and the schema to provide a corrected response.`;
-                throw new LlmRetryError(
-                    errorMessage,
-                    'CUSTOM_ERROR',
-                    validationError,
-                    rawResponseForError
-                );
+                    throw new LlmRetryError(
+                        errorMessage,
+                        'CUSTOM_ERROR',
+                        validationError,
+                        rawResponseForError
+                    );
+                }
+                // Rethrow other errors
+                throw validationError;
             }
         };
 
