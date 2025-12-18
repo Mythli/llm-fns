@@ -20,7 +20,7 @@
     "ajv": "^8.17.1",
     "openai": "^6.9.1",
     "undici": "^7.16.0",
-    "zod": "^4.1.13"
+    "zod": "^4.2.1"
   },
   "devDependencies": {
     "@keyv/sqlite": "^4.0.6",
