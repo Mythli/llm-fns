@@ -132,11 +132,17 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                 lastError
             );
 
+            // Capture raw response for error context
+            let rawResponseForError: string | null = null;
+
             try {
                 const completion = await currentPrompt({
                     messages: currentMessages,
                     ...restOptions,
                 });
+
+                // Extract raw content immediately
+                rawResponseForError = completion.choices[0]?.message?.content || null;
 
                 const assistantMessage = completion.choices[0]?.message;
                 let dataToProcess: any = completion;
@@ -187,27 +193,13 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                 return dataToProcess as T;
 
             } catch (error: any) {
-                if (error instanceof LlmFatalError) {
-                    const fatalAttemptError = new LlmRetryAttemptError(
-                        `Fatal error on attempt ${attempt + 1}: ${error.message}`,
-                        mode,
-                        currentMessages,
-                        attempt,
-                        error,
-                        error.rawResponse,
-                        { cause: lastError }
-                    );
-                    throw new LlmRetryExhaustedError(
-                        `Operation failed with fatal error on attempt ${attempt + 1}.`,
-                        { cause: fatalAttemptError }
-                    );
-                }
-
                 if (error instanceof LlmRetryError) {
                     const conversationForError = [...currentMessages];
                     
                     if (error.rawResponse) {
                         conversationForError.push({ role: 'assistant', content: error.rawResponse });
+                    } else if (rawResponseForError) {
+                        conversationForError.push({ role: 'assistant', content: rawResponseForError });
                     }
 
                     lastError = new LlmRetryAttemptError(
@@ -216,11 +208,27 @@ export function createLlmRetryClient(params: CreateLlmRetryClientParams) {
                         conversationForError, 
                         attempt,
                         error,
-                        error.rawResponse,
+                        error.rawResponse || rawResponseForError,
                         { cause: lastError }
                     );
                 } else {
-                    throw error;
+                    // For any other error (ZodError, SchemaValidationError that wasn't fixed, network error, etc.)
+                    // We wrap it in LlmFatalError to ensure context is preserved.
+                    
+                    const fatalMessage = error.message || 'An unexpected error occurred during LLM execution';
+                    
+                    // If it's already a fatal error, use its cause, otherwise use the error itself
+                    const cause = error instanceof LlmFatalError ? error.cause : error;
+                    
+                    // Use the raw response we captured, or if the error has one (e.g. LlmFatalError from lower client)
+                    const responseContent = rawResponseForError || (error as any).rawResponse || null;
+
+                    throw new LlmFatalError(
+                        fatalMessage,
+                        cause,
+                        currentMessages, // This contains the full history of retries
+                        responseContent
+                    );
                 }
             }
         }
