@@ -122,7 +122,7 @@ export function createZodLlmClient(params: CreateZodLlmClientParams) {
                         const path = e.path.length > 0 ? e.path.join('.') : '<root>';
                         return `${path}: ${e.message}`;
                     }).join('\n');
-                    throw new SchemaValidationError(errorMessages, error.errors);
+                    throw new SchemaValidationError(errorMessages, { cause: error });
                 }
                 throw error;
             }

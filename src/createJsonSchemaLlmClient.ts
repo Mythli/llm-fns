@@ -8,8 +8,8 @@ import {
 import { createLlmRetryClient, LlmRetryError, LlmRetryOptions } from "./createLlmRetryClient.js";
 
 export class SchemaValidationError extends Error {
-    constructor(message: string, public errors?: any[]) {
-        super(message);
+    constructor(message: string, options?: ErrorOptions) {
+        super(message, options);
         this.name = 'SchemaValidationError';
     }
 }
@@ -247,8 +247,8 @@ ${schemaJsonString}`;
                 const validate = ajv.compile(schema);
                 const valid = validate(data);
                 if (!valid) {
-                    const errors = validate.errors?.map(e => `${e.instancePath} ${e.message}`).join(', ');
-                    throw new SchemaValidationError(`AJV Validation Error: ${errors}`, validate.errors || []);
+                    const errors = (validate.errors || []).map(e => `${e.instancePath} ${e.message}`).join(', ');
+                    throw new SchemaValidationError(`AJV Validation Error: ${errors}`);
                 }
                 return data as T;
             } catch(error: any) {
