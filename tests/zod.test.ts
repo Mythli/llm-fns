@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createTestLlm } from './setup.js';
 import { createZodLlmClient } from '../src/createZodLlmClient.js';
 import { createJsonSchemaLlmClient } from '../src/createJsonSchemaLlmClient.js';
-import { LlmRetryExhaustedError } from '../src/createLlmRetryClient.js';
+import { LlmRetryExhaustedError, LlmRetryAttemptError } from '../src/createLlmRetryClient.js';
 
 // Helper to create a mock prompt function
 function createMockPrompt(responses: string[]) {
@@ -219,6 +219,57 @@ describe('Zod Structured Output Integration', () => {
                 .rejects.toThrow(LlmRetryExhaustedError);
             
             expect(mockPrompt).toHaveBeenCalledTimes(2); // Initial + 1 retry
+        });
+
+        it('should preserve the full cause chain when retries are exhausted', async () => {
+            const mockPrompt = createMockPrompt([
+                '{"age": "wrong1"}',
+                '{"age": "wrong2"}',
+                '{"age": "wrong3"}'
+            ]);
+
+            const jsonSchemaClient = createJsonSchemaLlmClient({
+                prompt: mockPrompt,
+                disableJsonFixer: true
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
+            });
+
+            try {
+                // Try with 2 retries (3 attempts total)
+                await client.promptZod("test", "test", Schema, { maxRetries: 2 });
+                throw new Error('Should have thrown LlmRetryExhaustedError');
+            } catch (error: any) {
+                expect(error).toBeInstanceOf(LlmRetryExhaustedError);
+                
+                // Verify the chain structure:
+                // LlmRetryExhaustedError
+                //   -> cause: LlmRetryAttemptError (Attempt 3)
+                //      -> cause: LlmRetryAttemptError (Attempt 2)
+                //         -> cause: LlmRetryAttemptError (Attempt 1)
+                //            -> cause: LlmRetryError (The actual validation error)
+                
+                const attempt3 = error.cause;
+                expect(attempt3).toBeInstanceOf(LlmRetryAttemptError);
+                expect(attempt3.attemptNumber).toBe(2);
+                expect(attempt3.message).toContain('Attempt 3 failed');
+
+                const attempt2 = attempt3.cause;
+                expect(attempt2).toBeInstanceOf(LlmRetryAttemptError);
+                expect(attempt2.attemptNumber).toBe(1);
+                expect(attempt2.message).toContain('Attempt 2 failed');
+
+                const attempt1 = attempt2.cause;
+                expect(attempt1).toBeInstanceOf(LlmRetryAttemptError);
+                expect(attempt1.attemptNumber).toBe(0);
+                expect(attempt1.message).toContain('Attempt 1 failed');
+                
+                // The root cause of the first attempt should be the validation error wrapper
+                expect(attempt1.cause.name).toBe('LlmRetryError');
+                expect(attempt1.cause.message).toContain('SCHEMA_VALIDATION_ERROR');
+            }
         });
     });
 });
