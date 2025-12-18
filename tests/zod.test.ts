@@ -4,6 +4,7 @@ import { createTestLlm } from './setup.js';
 import { createZodLlmClient } from '../src/createZodLlmClient.js';
 import { createJsonSchemaLlmClient } from '../src/createJsonSchemaLlmClient.js';
 import { LlmRetryExhaustedError, LlmRetryAttemptError } from '../src/createLlmRetryClient.js';
+import { LlmFatalError } from '../src/createLlmClient.js';
 
 // Helper to create a mock prompt function
 function createMockPrompt(responses: string[]) {
@@ -270,6 +271,44 @@ describe('Zod Structured Output Integration', () => {
                 // stored in the .error property, NOT .cause (which is the previous attempt error)
                 expect(attempt1.error.name).toBe('LlmRetryError');
                 expect(attempt1.error.message).toContain('SCHEMA_VALIDATION_ERROR');
+            }
+        });
+
+        it('should propagate fatal errors with context', async () => {
+            const fatalError = new LlmFatalError(
+                'Simulated Fatal Error',
+                new Error('Root cause'),
+                [{ role: 'user', content: 'test' }],
+                '{"error": "bad request"}'
+            );
+
+            const mockPrompt = vi.fn(async () => {
+                throw fatalError;
+            });
+
+            const jsonSchemaClient = createJsonSchemaLlmClient({
+                prompt: mockPrompt,
+            });
+
+            const client = createZodLlmClient({
+                jsonSchemaClient
+            });
+
+            try {
+                await client.promptZod("test", "test", Schema);
+                throw new Error('Should have thrown');
+            } catch (error: any) {
+                expect(error).toBeInstanceOf(LlmRetryExhaustedError);
+                expect(error.message).toContain('Fatal error');
+
+                const attemptError = error.cause;
+                expect(attemptError).toBeInstanceOf(LlmRetryAttemptError);
+                expect(attemptError.error).toBe(fatalError);
+                
+                // Check if context is preserved
+                expect(attemptError.conversation).toBeDefined();
+                expect(attemptError.conversation.length).toBeGreaterThan(0);
+                expect(attemptError.rawResponse).toBe('{"error": "bad request"}');
             }
         });
     });
