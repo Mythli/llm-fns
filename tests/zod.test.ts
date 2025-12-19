@@ -274,7 +274,7 @@ describe('Zod Structured Output Integration', () => {
             }
         });
 
-        it('should propagate fatal errors with context', async () => {
+        it('should propagate fatal errors with context immediately', async () => {
             const fatalError = new LlmFatalError(
                 'Simulated Fatal Error',
                 new Error('Root cause'),
@@ -298,18 +298,22 @@ describe('Zod Structured Output Integration', () => {
                 await client.promptZod("test", "test", Schema);
                 throw new Error('Should have thrown');
             } catch (error: any) {
-                expect(error).toBeInstanceOf(LlmRetryExhaustedError);
-                expect(error.message).toContain('fatal error');
+                // Expect the LlmFatalError to bubble up directly
+                expect(error).toBeInstanceOf(LlmFatalError);
+                expect(error.message).toBe('Simulated Fatal Error');
+                
+                // Check cause
+                expect(error.cause).toBeInstanceOf(Error);
+                expect(error.cause.message).toBe('Root cause');
 
-                const attemptError = error.cause;
-                expect(attemptError).toBeInstanceOf(LlmRetryAttemptError);
-                expect(attemptError.error).toBe(fatalError);
-
-                // Check if context is preserved
-                expect(attemptError.conversation).toBeDefined();
-                expect(attemptError.conversation.length).toBeGreaterThan(0);
-                expect(attemptError.rawResponse).toBe('{"error": "bad request"}');
+                // Check context
+                expect(error.messages).toBeDefined();
+                expect(error.messages.length).toBeGreaterThan(0);
+                expect(error.rawResponse).toBe('{"error": "bad request"}');
             }
+
+            // Verify fail-fast: should only be called once
+            expect(mockPrompt).toHaveBeenCalledTimes(1);
         });
     });
 });
